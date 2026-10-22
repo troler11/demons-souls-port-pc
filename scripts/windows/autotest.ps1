@@ -14,6 +14,8 @@
 param([int]$Seconds = 120, [string]$Tag = "run", [string]$Route = "menus", [string]$Save = "")
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
+# Tests skip the movies unless asked (SAIL_HOST_PLAY=1): minutes saved per run.
+if (-not $env:SAIL_HOST_PLAY) { $env:SAIL_HOST_PLAY = "0" }
 Set-DesEnv ""
 
 $menus = "25:0x4000,35:0x4000,45:0x4000,55:0x4000,65:0x4000,75:0x4000,85:0x4000,130:0x0008,150:0x0008,170:0x4000,185:0x4000,200:0x4000,215:0x4000,230:0x4000,245:0x4000,260:0x4000"

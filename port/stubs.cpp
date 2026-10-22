@@ -647,8 +647,48 @@ extern "C" double des_fps_frame_dt(double orig)
     return (double)(float)(dt < 0.05 ? dt : 0.05);
 }
 
+/* DES_FIND=<hex bytes>:<seconds>[:<repeat seconds>]: after that many seconds,
+ * scan the guest's committed memory for the byte string and print each hit
+ * with the 48 bytes that follow. For "where else does this vertex data live". */
+static DWORD WINAPI des_find_thread(LPVOID)
+{
+    char pat_hex[256] = {0}; unsigned secs = 0, rep = 0;
+    if (sscanf(getenv("DES_FIND"), "%255[0-9A-Fa-f]:%u:%u", pat_hex, &secs, &rep) < 2) return 0;
+    uint8_t pat[128]; size_t n = 0;
+    for (size_t i = 0; pat_hex[i] && pat_hex[i + 1] && n < sizeof pat; i += 2) {
+        unsigned b; sscanf(pat_hex + i, "%2x", &b); pat[n++] = (uint8_t)b;
+    }
+    if (!n) return 0;
+    for (;;) {
+        Sleep(secs * 1000u);
+        int hits = 0;
+        for (uint64_t ea = 0; ea < 0x100000000ull && hits < 32;) {
+            MEMORY_BASIC_INFORMATION mi;
+            if (!VirtualQuery(vm_base + ea, &mi, sizeof mi)) break;
+            const uint64_t region_end = (uint64_t)((uint8_t*)mi.BaseAddress + mi.RegionSize - vm_base);
+            if (mi.State == MEM_COMMIT && !(mi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
+                const uint8_t* p = vm_base + ea;
+                const uint8_t* end = vm_base + region_end;
+                for (; p + n + 48 <= end && hits < 32; p++)
+                    if (p[0] == pat[0] && memcmp(p, pat, n) == 0) {
+                        hits++;
+                        fprintf(stderr, "[des-find] %08llX:", (unsigned long long)(p - vm_base));
+                        for (int k = 0; k < 48; k++) fprintf(stderr, "%s%02X", (k % 4) ? "" : " ", p[k]);
+                        fprintf(stderr, "\n");
+                    }
+            }
+            ea = region_end;
+        }
+        fprintf(stderr, "[des-find] scan done, %d hit(s)\n", hits);
+        if (!rep) break;
+        secs = rep;
+    }
+    return 0;
+}
+
 extern "C" void ps3_load_prx_modules(void)
 {
+    if (getenv("DES_FIND")) CreateThread(NULL, 0, des_find_thread, NULL, 0, NULL);
     if (getenv("DES_WATCH")) CreateThread(NULL, 0, des_watch_thread, NULL, 0, NULL);
     if (getenv("DES_HEAPDUMP")) CreateThread(NULL, 0, des_heapdump_thread, NULL, 0, NULL);
     /* DES_ONE_LOG=1: send stdout (the title's TTY, the HLE modules) into stderr,
