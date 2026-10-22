@@ -68,3 +68,5 @@
 | `SAIL_AUDIO_RAW=<arquivo>` | Grava o som dos vídeos que vai para os alto-falantes (s16le estéreo 48 kHz). |
 | `DES_WATCH=<ea>:<len>:<s>`, `DES_DUMP=<ea>:<len>:<s>` | Vigia/despeja memória do jogo. |
 | `SPU_LLAR_BACKOFF=1` | Experimento (mais lento, desligado). |
+| `SPU_LOCK_STRIPES=0` | Volta à trava global única para as atômicas dos SPUs (padrão: 64 travas por linha, +4 fps). |
+| `SPU_LOCK_PROF=1` | A cada 5 s: aquisições/s, % com espera, núcleos esperando/segurando, e quem chama. |
