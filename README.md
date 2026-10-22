@@ -81,6 +81,7 @@ No PowerShell, na pasta do repositório:
 .\scripts\windows\play.ps1                                 # depois
 .\scripts\windows\play.ps1 -Fps30                          # o jogo original, a 30 fps
 .\scripts\windows\play.ps1 -Uncapped                       # sem limite de 60 fps (experimental)
+.\scripts\windows\play.ps1 -Resolution 1080p               # janela maior: 1080p, 1440p, 4k ou LxA
 ```
 
 **Controle**: um controle XInput (Xbox ou compatível) funciona direto, com os botões na posição do controle do PS3.

@@ -170,6 +170,7 @@ extern "C" unsigned ppu_boot_frames_presented(void)
  * RSX_LIVE_DRAW=1, wired as runtime/ppu/tests/boot_main.cpp does it: the null
  * backend opens the window and the engine presents into it. */
 extern "C" int   rsx_live_draw_enabled(void);
+extern "C" void  rsx_live_draw_set_output_size(uint32_t w, uint32_t h);
 extern "C" int   rsx_live_draw_init(void* hwnd, uint32_t w, uint32_t h,
                                     const uint8_t* (*guest_ptr)(void*, uint32_t, uint32_t, uint32_t),
                                     void* user);
@@ -238,7 +239,20 @@ static DWORD WINAPI frame_clock(LPVOID)
     int rsx_ok;
 #if defined(_WIN32)
     if (rsx_live_draw_enabled()) {
-        rsx_ok = (rsx_null_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
+        /* DES_WINDOW=<w>x<h> | 720p | 1080p | 1440p | 4k: window size; the
+         * 1280x720 guest frame is scaled into it on the GPU. */
+        uint32_t win_w = WINDOW_WIDTH, win_h = WINDOW_HEIGHT;
+        if (const char* e = getenv("DES_WINDOW")) {
+            if (!_stricmp(e, "1080p")) { win_w = 1920; win_h = 1080; }
+            else if (!_stricmp(e, "1440p") || !_stricmp(e, "2k")) { win_w = 2560; win_h = 1440; }
+            else if (!_stricmp(e, "4k") || !_stricmp(e, "2160p")) { win_w = 3840; win_h = 2160; }
+            else if (!_stricmp(e, "720p")) { win_w = 1280; win_h = 720; }
+            else { unsigned a = 0, b = 0; if (sscanf(e, "%ux%u", &a, &b) == 2 && a >= 320 && b >= 180) { win_w = a; win_h = b; } }
+        }
+        if (win_w != WINDOW_WIDTH || win_h != WINDOW_HEIGHT) {
+            rsx_live_draw_set_output_size(win_w, win_h);
+        }
+        rsx_ok = (rsx_null_backend_init(win_w, win_h, title) == 0);
         if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), WINDOW_WIDTH, WINDOW_HEIGHT,
                                          rsx_live_guest_ptr, nullptr) == 0) {
             s_rsx_live = 1;
