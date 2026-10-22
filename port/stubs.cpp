@@ -549,6 +549,7 @@ extern "C" uint32_t ppu_guest_func_for_rip(uintptr_t rip);
 static uintptr_t s_watch_page, s_watch_lo, s_watch_hi;
 static volatile LONG s_watch_hits;
 static __declspec(thread) int t_watch_rearm;
+static __declspec(thread) uintptr_t t_watch_addr;   /* logged store, value printed after it */
 
 static LONG CALLBACK des_watch_handler(EXCEPTION_POINTERS* x)
 {
@@ -579,6 +580,7 @@ static LONG CALLBACK des_watch_handler(EXCEPTION_POINTERS* x)
                   if ((uintptr_t)bt[i] - base < 0x40000000u)
                       o += snprintf(line + o, sizeof line - o, " %llX", (unsigned long long)((uintptr_t)bt[i] - base)); }
             fprintf(stderr, "%s\n", line);
+            t_watch_addr = a;
         }
         DWORD old; VirtualProtect((void*)s_watch_page, 0x1000, PAGE_READWRITE, &old);
         x->ContextRecord->EFlags |= 0x100;   /* trap after the store, then re-arm */
@@ -587,6 +589,12 @@ static LONG CALLBACK des_watch_handler(EXCEPTION_POINTERS* x)
     }
     if (code == EXCEPTION_SINGLE_STEP && t_watch_rearm) {
         t_watch_rearm = 0;
+        if (t_watch_addr) {
+            const uint8_t* q = (const uint8_t*)(t_watch_addr & ~(uintptr_t)3);
+            fprintf(stderr, "[des-watch]   -> 0x%08X now %02X%02X%02X%02X\n",
+                    (unsigned)((uintptr_t)q - (uintptr_t)vm_base), q[0], q[1], q[2], q[3]);
+            t_watch_addr = 0;
+        }
         DWORD old; VirtualProtect((void*)s_watch_page, 0x1000, PAGE_READONLY, &old);
         return EXCEPTION_CONTINUE_EXECUTION;
     }
@@ -653,11 +661,15 @@ extern "C" double des_fps_frame_dt(double orig)
 static DWORD WINAPI des_find_thread(LPVOID)
 {
     char pat_hex[256] = {0}; unsigned secs = 0, rep = 0;
-    if (sscanf(getenv("DES_FIND"), "%255[0-9A-Fa-f]:%u:%u", pat_hex, &secs, &rep) < 2) return 0;
-    uint8_t pat[128]; size_t n = 0;
+    /* "??" in the pattern matches any byte. */
+    if (sscanf(getenv("DES_FIND"), "%255[0-9A-Fa-f?]:%u:%u", pat_hex, &secs, &rep) < 2) return 0;
+    uint8_t pat[128], any[128]; size_t n = 0;
     for (size_t i = 0; pat_hex[i] && pat_hex[i + 1] && n < sizeof pat; i += 2) {
-        unsigned b; sscanf(pat_hex + i, "%2x", &b); pat[n++] = (uint8_t)b;
+        any[n] = pat_hex[i] == '?';
+        unsigned b = 0; if (!any[n]) sscanf(pat_hex + i, "%2x", &b); pat[n++] = (uint8_t)b;
     }
+    size_t first = 0; while (first < n && any[first]) first++;
+    if (first == n) return 0;
     if (!n) return 0;
     for (;;) {
         Sleep(secs * 1000u);
@@ -670,7 +682,8 @@ static DWORD WINAPI des_find_thread(LPVOID)
                 const uint8_t* p = vm_base + ea;
                 const uint8_t* end = vm_base + region_end;
                 for (; p + n + 48 <= end && hits < 32; p++)
-                    if (p[0] == pat[0] && memcmp(p, pat, n) == 0) {
+                    if (p[first] == pat[first] && [&] { for (size_t k = 0; k < n; k++)
+                            if (!any[k] && p[k] != pat[k]) return false; return true; }()) {
                         hits++;
                         fprintf(stderr, "[des-find] %08llX:", (unsigned long long)(p - vm_base));
                         for (int k = 0; k < 48; k++) fprintf(stderr, "%s%02X", (k % 4) ? "" : " ", p[k]);

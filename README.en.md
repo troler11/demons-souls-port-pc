@@ -80,6 +80,7 @@ In PowerShell, from the repository folder:
 .\scripts\windows\play.ps1 -Rpcs3 "C:\path\to\rpcs3"   # first time (remembered)
 .\scripts\windows\play.ps1                              # afterwards
 .\scripts\windows\play.ps1 -Fps30                       # the stock game at 30 fps
+.\scripts\windows\play.ps1 -Uncapped                    # no 60 fps cap (experimental)
 ```
 
 **Controller**: an XInput controller (Xbox or compatible) works out of the box, with its buttons in the PS3 controller's positions.
