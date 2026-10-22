@@ -21,6 +21,7 @@ Outubro de 2026, no Windows:
 - **Do boot ao tutorial**: avisos, menu principal, criação de personagem, cinemática de abertura e o tutorial (corredor, pátio, combate com os hollows, a torre). Os saves funcionam.
 - **Renderizador próprio em Direct3D 12** (o "live draw" do ps3recomp, com as mudanças deste projeto): sombras, névoa, partículas suaves, adaptação de exposição, profundidade de campo e oclusão do sol e dos lens flares.
 - **60 fps**: o patch "Unlock FPS" do RPCS3 (Gibbed e Whatcookie), aplicado como código. O corredor do tutorial fica em ~59 fps e o pátio com combate entre 46 e 59 fps. O modo original de 30 fps (`-Fps30`) fica cravado em 30.
+- **Cinemáticas em vídeo** (`.pam`), tocadas pelo [ffmpeg](https://ffmpeg.org) com som: a abertura, a tela-título e a introdução da história.
 - **Áudio** completo, sem cortes: músicas, vozes e efeitos (MultiStream + ATRAC, com o codec do seu firmware).
 - **O kernel real do SPURS** (`libsre`, do seu firmware) roda recompilado, não emulado por aproximação.
 - **Problemas conhecidos**: em brigas com muitos inimigos o fps cai para a casa dos 40, porque o limite são os SPUs recompilados, não a placa de vídeo. Algumas partículas podem faltar, e o céu às vezes estoura em áreas externas.
@@ -35,6 +36,7 @@ O diário técnico completo, com cada problema encontrado e como foi resolvido, 
 - **Para compilar**:
   - Visual Studio 2022 ou mais novo, com "Desenvolvimento para desktop com C++" e o componente **"C++ Clang tools for Windows"** (clang-cl);
   - Python 3.10+ e Git no PATH;
+- **[ffmpeg](https://ffmpeg.org)** no PATH (`winget install Gyan.FFmpeg`) ou em `third_party\ffmpeg\bin`, para os vídeos. Sem ele o jogo pula as cinemáticas.
   - ~20 GB livres e **16 GB de RAM** ou mais. O código gerado tem ~2,4 GB e um build do zero leva de 30 a 60 minutos.
 
 ## Compilando

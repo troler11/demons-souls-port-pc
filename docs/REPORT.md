@@ -356,6 +356,7 @@ Diagnósticos novos: `LD_PS_TEX0_TC=1|2`, `LD_DRAW_DUMP_FROM=<frame>`, `LD_BIND_
       - nas SPUs, ~30% é spin no lock global de lock-line e ~17% é `mfc_for`.
     - Testei um backoff para GETLLAR repetido sem PUTLLC (`SPU_LLAR_BACKOFF=1`): piorou (51 vs 55). Fica desligado.
     - Próximo: dividir o lock de lock-line por linha, ou reduzir a latência da cadeia SPU→HighGraphics.
+62. **Cinemáticas não apareciam** (`run.ps1`/`env.ps1`). O player de vídeo no host (item 26, `SAIL_HOST_PLAY=1` + ffmpeg) existia, mas nenhum script o ligava: sem ele o cellSail declara cada vídeo terminado na hora, e o jogo pulava a abertura (`ds_advertise.pam`), a tela-título (`ds_title.pam`) e a introdução da história (`ds_opening.pam`, depois de Novo Jogo). Agora vem ligado por padrão; o ffmpeg vem do PATH ou de `third_partyfmpegin` (`SAIL_FFMPEG`). Conferido: a abertura toca com imagem e som até o ✕ pular, depois a tela-título.
 43. Ferramentas novas: `/MAP` agora fica permanente no `CMakeLists.txt`. O script `rva2sym.py` (no scratchpad) aceita como 3º argumento o índice do relatório (`-2` = penúltimo). Os relatórios do sampler já são por intervalo de 10 s, porque os contadores zeram a cada relatório.
 
 **Próximo (antigo):** o carregamento do m08 para depois de `sound/ds_se_c2000.mo*` (≈207 arquivos do disco), sempre no mesmo ponto; a tela de loading continua animada.

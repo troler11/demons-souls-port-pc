@@ -21,6 +21,7 @@ October 2026, on Windows:
 - **Boot to tutorial**: notices, main menu, character creation, opening cinematic and the tutorial (corridor, courtyard, fighting the hollows, the tower). Saves work.
 - **Its own Direct3D 12 renderer** (ps3recomp's "live draw" with this project's changes): shadows, fog, soft particles, eye adaptation, depth of field, and occlusion for the sun and lens flares.
 - **60 fps**: RPCS3's "Unlock FPS" patch (Gibbed and Whatcookie), applied as code. The tutorial corridor holds ~59 fps and the courtyard fight 46-59 fps. The stock 30 fps mode (`-Fps30`) stays locked at 30.
+- **Video cinematics** (`.pam`), played through [ffmpeg](https://ffmpeg.org) with sound: the opening, the title screen and the story intro.
 - **Audio** complete and clean: music, voices and effects (MultiStream + ATRAC, using the codec from your firmware).
 - **The real SPURS kernel** (`libsre`, from your firmware) runs recompiled rather than approximated.
 - **Known issues**: fights with many enemies drop into the 40s, because the limit is the recompiled SPU code, not the GPU. Some particles may be missing, and the sky sometimes blows out in outdoor areas.
@@ -35,6 +36,7 @@ The full technical diary (in Portuguese), with every problem found and how it wa
 - **To build**:
   - Visual Studio 2022 or newer with "Desktop development with C++" and the **"C++ Clang tools for Windows"** component (clang-cl);
   - Python 3.10+ and Git on PATH;
+- **[ffmpeg](https://ffmpeg.org)** on PATH (`winget install Gyan.FFmpeg`) or in `third_party\ffmpeg\bin`, for the movies. Without it the game skips its cinematics.
   - ~20 GB free and **16 GB of RAM** or more. The generated code is ~2.4 GB, and a build from scratch takes 30-60 minutes.
 
 ## Building

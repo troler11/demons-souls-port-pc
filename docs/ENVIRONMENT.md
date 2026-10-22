@@ -13,6 +13,8 @@
 | `PS3_GCM_BEGIN_OFFSET` | `1000` | O SPU publica o put do GCM a partir de 4 KB no IO. |
 | `PS3_GCM_NO_TITLE_RECYCLE` | `1` | O jogo percorre os próprios segmentos de comando. |
 | `YDKJ_FORCE_HLE` | `8A85674D,011EE38B` | LFQueue push/init no lado HLE (descompressão no host). |
+| `SAIL_HOST_PLAY` | `1` | Toca os vídeos `.pam` no host com o ffmpeg. Sem isso o jogo pula as cinemáticas. |
+| `SAIL_FFMPEG` | ffmpeg do PATH ou `third_party\ffmpeg\bin` | Qual ffmpeg usar. |
 | `SAIL_OPEN_DONE_EVENT` / `SAIL_CLOSE_EVENT` | `9` / `5` | Eventos que a tarefa de vídeo espera. |
 | `LD_SURF_WRITEBACK` | `1` | Copia os alvos de luminância de volta para a VRAM do jogo (adaptação de exposição). |
 | `DES_FPS_UNLOCK` | `1` | 60 fps (patch Unlock FPS). `0` = 30 fps original. |
@@ -61,5 +63,6 @@
 | `SYSCALL_TRACE_THREAD=<nome>` / `SYSCALL_TRACE_TID` | Syscalls lentas de uma thread. |
 | `SYSCALL_TRACE_SC=<n>` [+`SYSCALL_TRACE_A0=<hex>`] | Toda chamada de uma syscall, de qualquer thread. |
 | `RECV_TRACE_TID`, `COND_PROF` | Recepções de eventos; esperas em condition variables. |
+| `SAIL_DUMP=<pasta>` | Grava 1 quadro dos vídeos a cada 300. |
 | `DES_WATCH=<ea>:<len>:<s>`, `DES_DUMP=<ea>:<len>:<s>` | Vigia/despeja memória do jogo. |
 | `SPU_LLAR_BACKOFF=1` | Experimento (mais lento, desligado). |

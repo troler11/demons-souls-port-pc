@@ -25,6 +25,16 @@ function Set-DesEnv([string]$Rpcs3) {
     if (-not $env:PS3_GCM_NO_TITLE_RECYCLE) { $env:PS3_GCM_NO_TITLE_RECYCLE = "1" }
     # LFQueue push/init (host inflate for the decompressor) stay on the HLE side.
     if (-not $env:YDKJ_FORCE_HLE) { $env:YDKJ_FORCE_HLE = "8A85674D,011EE38B" }
+    # Movies (.pam): played on the host with ffmpeg. Without it cellSail ends
+    # every movie at once and the game skips its cinematics.
+    if (-not $env:SAIL_HOST_PLAY) { $env:SAIL_HOST_PLAY = "1" }
+    if (-not $env:SAIL_FFMPEG) {
+        $ff = Join-Path $Root "third_party\ffmpeg\bin\ffmpeg.exe"
+        if (Test-Path $ff) { $env:SAIL_FFMPEG = $ff }
+        elseif (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            Write-Warning "ffmpeg not found (PATH or third_party\ffmpeg): the cinematics will be skipped"
+        }
+    }
     # The SAIL events the movie task waits for; quiet logging.
     if (-not $env:SAIL_OPEN_DONE_EVENT) { $env:SAIL_OPEN_DONE_EVENT = "9" }
     if (-not $env:SAIL_CLOSE_EVENT)     { $env:SAIL_CLOSE_EVENT = "5" }
