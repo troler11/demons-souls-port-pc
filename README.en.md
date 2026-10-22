@@ -21,6 +21,7 @@ October 2026, on Windows:
 - **Boot to tutorial**: notices, main menu, character creation, opening cinematic and the tutorial (corridor, courtyard, fighting the hollows, the tower). Saves work.
 - **Its own Direct3D 12 renderer** (ps3recomp's "live draw" with this project's changes): shadows, fog, soft particles, eye adaptation, depth of field, and occlusion for the sun and lens flares.
 - **60 fps**: RPCS3's "Unlock FPS" patch (Gibbed and Whatcookie), applied as code. The tutorial corridor holds ~59 fps and the courtyard fight 46-59 fps. The stock 30 fps mode (`-Fps30`) stays locked at 30.
+- **Resolution**: a 720p to 4K window, with the scene rendered internally at up to 4x (2560x1440, 3840x2160...) on the GPU at about the same CPU cost (`-Resolution`, `-Scale`).
 - **Video cinematics** (`.pam`), played through [ffmpeg](https://ffmpeg.org) with sound: the opening, the title screen and the story intro.
 - **Audio** complete and clean: music, voices and effects (MultiStream + ATRAC, using the codec from your firmware).
 - **The real SPURS kernel** (`libsre`, from your firmware) runs recompiled rather than approximated.
@@ -81,7 +82,8 @@ In PowerShell, from the repository folder:
 .\scripts\windows\play.ps1                              # afterwards
 .\scripts\windows\play.ps1 -Fps30                       # the stock game at 30 fps
 .\scripts\windows\play.ps1 -Uncapped                    # no 60 fps cap (experimental)
-.\scripts\windows\play.ps1 -Resolution 1080p            # bigger window: 1080p, 1440p, 4k or WxH
+.\scripts\windows\play.ps1 -Resolution 1080p            # 1080p, 1440p, 4k or WxH (the scene renders at 2x/3x)
+.\scripts\windows\play.ps1 -Resolution 4k -Scale 2      # pick the internal resolution (1-4x 1280x720)
 ```
 
 **Controller**: an XInput controller (Xbox or compatible) works out of the box, with its buttons in the PS3 controller's positions.

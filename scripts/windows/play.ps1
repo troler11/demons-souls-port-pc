@@ -7,14 +7,27 @@
 #                                                          # the game was made for 30/60)
 #   .\scripts\windows\play.ps1 -Resolution 1080p           # window size: 720p, 1080p,
 #                                                          # 1440p, 4k or e.g. 2560x1080
+#   .\scripts\windows\play.ps1 -Resolution 4k -Scale 3     # internal resolution: the
+#                                                          # scene renders 1..4x 1280x720
+#                                                          # (default: matches -Resolution)
 #
 # Saves go to work\gamedata\dev_hdd0. The log goes to work\logs\play.err.
-param([string]$Rpcs3 = "", [switch]$Fps30, [switch]$Uncapped, [string]$Resolution = "")
+param([string]$Rpcs3 = "", [switch]$Fps30, [switch]$Uncapped, [string]$Resolution = "",
+      [int]$Scale = 0)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
 if ($Fps30) { $env:DES_FPS_UNLOCK = "0" }
 if ($Uncapped) { $env:LD_PRESENT_MIN_US = "0" }
-if ($Resolution) { $env:DES_WINDOW = $Resolution }
+if ($Resolution) {
+    $env:DES_WINDOW = $Resolution
+    if ($Scale -eq 0) {
+        # Render at least as many pixels as the window shows.
+        $h = switch -regex ($Resolution) { '^1080p$' { 1080 } '^(1440p|2k)$' { 1440 } '^(4k|2160p)$' { 2160 }
+                                            '^\d+x(\d+)$' { [int]$matches[1] } default { 720 } }
+        $Scale = [math]::Min(4, [math]::Ceiling($h / 720.0))
+    }
+}
+if ($Scale -gt 1) { $env:LD_RES_SCALE = "$Scale" }
 Set-DesEnv $Rpcs3
 $logs = Join-Path $Work "logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
