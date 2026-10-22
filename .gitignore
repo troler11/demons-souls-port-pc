@@ -1,0 +1,27 @@
+# Your game, your firmware and everything generated from them. Never commit.
+/work/
+/third_party/
+/build/
+
+# Game and firmware formats, wherever they end up.
+*.elf
+*.ELF
+*.BIN
+*.bin
+*.self
+*.sprx
+*.prx
+*.pkg
+*.iso
+*.PUP
+*.dkey
+*.ppm
+*.f32
+savedata/
+
+# Logs and tooling
+*.log
+*.err
+*.out
+__pycache__/
+.vs/

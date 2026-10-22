@@ -1,0 +1,65 @@
+# Variáveis de ambiente
+
+`scripts/windows/env.ps1` define os padrões com que o jogo roda. Qualquer variável definida antes de chamar `play.ps1`/`autotest.ps1` tem prioridade. Os números entre parênteses são os itens do [diário](REPORT.md).
+
+## O que o jogo precisa (padrões)
+
+| Variável | Padrão | O que faz |
+|---|---|---|
+| `RSX_LIVE_DRAW` | `1` | Renderizador Direct3D 12. |
+| `DES_LIBSRE` | `work\lle\out\libsre_image.bin` | Roda o kernel SPURS real do firmware em vez do HLE. |
+| `DES_ONE_LOG` | `1` | Log enxuto. |
+| `PS3_DEV_FLASH` | `<rpcs3>\dev_flash` | Serve `/dev_flash` (o codec ATRAC do áudio). |
+| `PS3_GCM_BEGIN_OFFSET` | `1000` | O SPU publica o put do GCM a partir de 4 KB no IO. |
+| `PS3_GCM_NO_TITLE_RECYCLE` | `1` | O jogo percorre os próprios segmentos de comando. |
+| `YDKJ_FORCE_HLE` | `8A85674D,011EE38B` | LFQueue push/init no lado HLE (descompressão no host). |
+| `SAIL_OPEN_DONE_EVENT` / `SAIL_CLOSE_EVENT` | `9` / `5` | Eventos que a tarefa de vídeo espera. |
+| `LD_SURF_WRITEBACK` | `1` | Copia os alvos de luminância de volta para a VRAM do jogo (adaptação de exposição). |
+| `DES_FPS_UNLOCK` | `1` | 60 fps (patch Unlock FPS). `0` = 30 fps original. |
+| `LD_VSYNC` / `LD_ASYNC_PRESENT` / `LD_PRESENT_MIN_US` | `0` / `1` / `16683` | Modo 60: present sem vsync, CPU e GPU sobrepostas, limite de 59,94 fps (60). |
+| `GCM_FLIP_MIN_US` | `33300` no modo 30 | Segura os flips a 30 por segundo (55). |
+
+## Renderizador
+
+| Variável | O que faz |
+|---|---|
+| `LD_ZPACK_SELF=0` | Desliga a profundidade para draws que a leem e testam ao mesmo tempo (névoa, partículas suaves) (57). |
+| `LD_ZPASS=0` | Volta a responder "visível" a toda consulta de oclusão (flares atravessam paredes) (58). |
+| `LD_ZPASS_START=0` | Começa com a contagem de oclusão desligada. |
+| `LD_GEOM_CACHE`, `LD_VERTEX_BATCH`, `LD_TEX_REHASH_LAZY` | Caches do renderizador (ligados). |
+| `LD_SHADOW` | Comparação de sombra (ligada). |
+
+## Áudio
+
+| Variável | O que faz |
+|---|---|
+| `AUDIO_CLOCK_PACE=0` | Mistura guiada pela placa de som (o comportamento antigo, picotado) (56). |
+| `AUDIO_DEVICE_MS` | Buffer da placa de som em ms (padrão 60). |
+| `AUDIO_LEAD_BLOCKS` | Blocos de folga do índice de leitura publicado (padrão 3). |
+| `AUDIO_RATE=1` | A cada 5 s: blocos/s, % de blocos mudos, frames descartados. |
+| `AUDIO_WAV=<arquivo>` | Grava a mistura final (f32le, estéreo, 48 kHz). |
+| `AUDIO_SEQ_LOG=1`, `AUDIO_NOTIFY_LOG=1` | Quais blocos de cada porta tinham dados; eventos de notificação. |
+
+## Entrada automática
+
+| Variável | O que faz |
+|---|---|
+| `PAD_SCRIPT=<s>:<botões>,...` | Aperta botões em segundos fixos. `0x4000` ✕, `0x0800` R1, `0x0008` Start. |
+| `PAD_PATH=<t0>-<t1>:lx,ly,rx,ry;...` | Segura os analógicos (0-255, 128 = centro) em cada intervalo. Para frente: `128,0,128,128`. |
+| `PAD_NO_KEYBOARD=1` | Desliga o teclado como controle. |
+
+## Diagnóstico
+
+| Variável | O que faz |
+|---|---|
+| `LD_FRAME_DUMP=<pasta>` (+`_EVERY`, `_FROM`) | Grava a tela em `.ppm` a cada N frames. |
+| `LD_DRAW_DUMP=<pasta>` (+`_EVERY`, `_FRAMES`, `_AT_MS`) | Lê de volta o alvo antes de cada draw de um frame (quanto cada draw pinta). |
+| `RSX_DRAW_CSV=<arquivo>` (+`_FROM`, `_GATE`) | Estado de cada draw em CSV. |
+| `LD_HLSL_DUMP=<pasta>` | Grava os shaders HLSL gerados. |
+| `LD_FLUSH_PROF=1`, `PS3_FC_PROF=1` | Onde vai o tempo do renderizador e do relógio de frames. |
+| `PS3_SAMPLE=<ms>` + `PS3_SAMPLE_MAIN=1` [+`PS3_SAMPLE_THREAD=<nome>`] | Amostrador de CPU de uma thread (`HighGraphics`, `spu1000_0`...). Gera um `.map` para os nomes. |
+| `SYSCALL_TRACE_THREAD=<nome>` / `SYSCALL_TRACE_TID` | Syscalls lentas de uma thread. |
+| `SYSCALL_TRACE_SC=<n>` [+`SYSCALL_TRACE_A0=<hex>`] | Toda chamada de uma syscall, de qualquer thread. |
+| `RECV_TRACE_TID`, `COND_PROF` | Recepções de eventos; esperas em condition variables. |
+| `DES_WATCH=<ea>:<len>:<s>`, `DES_DUMP=<ea>:<len>:<s>` | Vigia/despeja memória do jogo. |
+| `SPU_LLAR_BACKOFF=1` | Experimento (mais lento, desligado). |
