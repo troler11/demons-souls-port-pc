@@ -84,6 +84,8 @@
 | `SPU_DRAIN_SLOW=1` | Despachante SPU com todas as checagens a cada salto (o padrão pula as de diagnóstico). |
 | `SPU_RCV_RATE=1` | Eventos por segundo que cada thread SPU do lv2 recebe. |
 | `PS3RECOMP_SPU_MERGE=1` (no build) | Lifter SPU com `--merge-chunks` (laços em C). Experimental: trava em Boletaria. |
+| `LD_CB_REUSE=0`, `LD_SRV_REUSE=0` | Sempre reenviar as constantes de vértice / a tabela de descritores (padrão: reaproveitar quando não mudaram). |
+| `PS3_USLEEP_MODE=spinwake` | `usleep` curto que gira mas sai quando um SPU grava na memória. |
 | `PS3_THREAD_CPU=<s>` | A cada s segundos, quanto de um núcleo cada thread gastou. |
 | `SPU_LOCK_STRIPES=0` | Volta à trava global única para as atômicas dos SPUs (padrão: 64 travas por linha, +4 fps). |
 | `SPU_LOCK_PROF=1` | A cada 5 s: aquisições/s, % com espera, núcleos esperando/segurando, e quem chama. |
