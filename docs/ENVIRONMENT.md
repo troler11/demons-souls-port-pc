@@ -80,6 +80,10 @@
 | `FC_SPIN_US` | Giro do `frame_clock` enquanto o jogo desenha (µs). Padrão: 100000 com 10+ processadores lógicos, 0 com menos. |
 | `PS3_USLEEP_MODE=spin\|sleep\|progress` | Como um `usleep` curto espera (padrão `spin`). |
 | `SPU_LLAR_WAIT=1` | SPU que relê a mesma linha atômica sem mudança dorme até alguém gravar nela (desligado: sem ganho medido). |
+| `SPU_FAST_FIX=0` | Volta ao conserto antigo (lento) de soma/multiplicação de float SPU fora da faixa normal. |
+| `SPU_DRAIN_SLOW=1` | Despachante SPU com todas as checagens a cada salto (o padrão pula as de diagnóstico). |
+| `SPU_RCV_RATE=1` | Eventos por segundo que cada thread SPU do lv2 recebe. |
+| `PS3RECOMP_SPU_MERGE=1` (no build) | Lifter SPU com `--merge-chunks` (laços em C). Experimental: trava em Boletaria. |
 | `PS3_THREAD_CPU=<s>` | A cada s segundos, quanto de um núcleo cada thread gastou. |
 | `SPU_LOCK_STRIPES=0` | Volta à trava global única para as atômicas dos SPUs (padrão: 64 travas por linha, +4 fps). |
 | `SPU_LOCK_PROF=1` | A cada 5 s: aquisições/s, % com espera, núcleos esperando/segurando, e quem chama. |
