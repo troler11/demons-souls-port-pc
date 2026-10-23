@@ -31,6 +31,30 @@
 /* The lifter's generated header, which declares ppu_context and the function
  * table. It comes first: everything below is written against that struct. */
 #include "ppu_recomp.h"
+#include "ps3emu/ps3_knob.h"
+
+extern "C" void ps3_title_options_init(void);
+
+static volatile int s_vblank_mhz_custom = 0;
+extern "C" void ps3_vblank_set_mhz(int mhz)
+{
+    s_vblank_mhz_custom = mhz;
+}
+
+extern "C" void ps3_env_bump(void)
+{
+    ps3_env_gen++;
+}
+
+extern "C" void ps3_setenv(const char* name, const char* value)
+{
+#ifdef _WIN32
+    _putenv_s(name, value ? value : "");
+#else
+    if (value) setenv(name, value, 1); else unsetenv(name);
+#endif
+    ps3_env_gen++;
+}
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
  * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
@@ -300,6 +324,7 @@ static DWORD WINAPI frame_clock(LPVOID)
      * came in bursts. (From the God of War: Ascension port, patch 0025.) */
     double vblank_us = 1e6 * 1001.0 / 60000.0;
     { const char* e = getenv("PS3_VBLANK_HZ"); if (e) { double v = atof(e); if (v >= 10.0 && v <= 240.0) vblank_us = 1e6 / v; } }
+    if (s_vblank_mhz_custom > 0) vblank_us = 1e6 / (double)s_vblank_mhz_custom;
     double next_tick_us = (double)ps3_qpc_us();
     (void)next_tick;
     /* A guest thread starved for the RSX signals the kick event (a dry fence
@@ -308,6 +333,7 @@ static DWORD WINAPI frame_clock(LPVOID)
     HANDLE kick = (HANDLE)cellGcm_fifo_kick_event();
 
     for (;;) {
+        if (s_vblank_mhz_custom > 0) vblank_us = 1e6 / (double)s_vblank_mhz_custom;
         double w0 = fc_prof ? fc_now() : 0;
         /* With LD_DRAW_DUMP set, F9 captures every draw of the next frames
          * (the window must have focus). */
@@ -541,6 +567,7 @@ int main(int argc, char** argv)
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
 
     ppu_recomp_register();   /* lifted function table -> address map */
+    ps3_title_options_init();
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
     ppu_hle_init();          /* firmware import NID -> HLE handlers */
     ppu_sysprx_register();   /* boot-critical CRT */

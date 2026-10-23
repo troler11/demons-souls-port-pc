@@ -175,6 +175,8 @@ endif()
 add_executable(${PROJECT_NAME}
     main.cpp
     stubs.cpp
+    des_options.cpp
+    des_menu_sfx.cpp
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
@@ -205,7 +207,7 @@ if(SPU_SOURCES)
         # -frounding-math: SPU code runs in round-toward-zero (spu_run_with_halt),
         # so the compiler must not fold float ops under round-to-nearest.
         set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "/w;-O2;-msse4.1;-mavx2;-mfma;-mbmi2;/GS-;/clang:-frounding-math;/clang:-fms-compatibility-version=19.24")
-        set_source_files_properties(${PS3RECOMP_SCAFFOLD} main.cpp stubs.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mbmi2;/GS-")
+        set_source_files_properties(${PS3RECOMP_SCAFFOLD} main.cpp stubs.cpp des_options.cpp des_menu_sfx.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mbmi2;/GS-")
     endif()
 endif()
 
@@ -247,10 +249,15 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/runtime/platform"        # win32_compat.h and friends
     "${PS3RECOMP_DIR}/libs/video"
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ui/include"
 )
+
+# --- The wrapper UI (port/ui) ---
+add_subdirectory(ui)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
+    des_ui
 )
 
 # The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
@@ -269,6 +276,11 @@ if(WIN32)
         gdi32
         winmm
         dxguid  # IID_IDXGIFactory6 in rsx_d3d12_backend.c (not in its pragma list)
+        d3d11
+        d3d12
+        dxgi
+        d3dcompiler
+        uuid
     )
 endif()
 

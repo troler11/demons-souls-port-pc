@@ -2,6 +2,7 @@
 /work/
 /third_party/
 /build/
+/scratch/
 
 # Game and firmware formats, wherever they end up.
 *.elf
