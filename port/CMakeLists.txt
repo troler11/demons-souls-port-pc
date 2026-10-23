@@ -197,14 +197,15 @@ endif()
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
-        COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
+        COMPILE_DEFINITIONS "SPU_USE_DISPATCH_MT;SPU_ASSUME_SPU_FP;SPU_LS_NO_HOOKS")
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # -msse4.1: spu_helpers.h's SSE forms (pshufb shufb, the float ops)
         # exist only under __SSE4_1__; without it shufb is a byte loop.
         # -mfma: the SPU-float-mode fma is one vfmadd (Zen 3 and later).
         # -frounding-math: SPU code runs in round-toward-zero (spu_run_with_halt),
         # so the compiler must not fold float ops under round-to-nearest.
-        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2;-msse4.1;-mfma;/clang:-frounding-math")
+        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "/w;-O2;-msse4.1;-mavx2;-mfma;-mbmi2;/GS-;/clang:-frounding-math;/clang:-fms-compatibility-version=19.24")
+        set_source_files_properties(${PS3RECOMP_SCAFFOLD} main.cpp stubs.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mbmi2;/GS-")
     endif()
 endif()
 
@@ -220,7 +221,7 @@ if(EXISTS "${DES_LIBSRE_DIR}/recomp/libsre_recomp_000.cpp")
         INCLUDE_DIRECTORIES "${DES_LIBSRE_DIR}/recomp;${DES_LIBSRE_DIR};${PS3RECOMP_DIR}/runtime")
     if(MSVC)
         set_source_files_properties("${DES_LIBSRE_DIR}/recomp/libsre_recomp_000.cpp" PROPERTIES
-            COMPILE_OPTIONS "/w;/bigobj")
+            COMPILE_OPTIONS "/w;/bigobj;/GS-;-mavx2;-mfma;-mbmi2")
     else()
         set_source_files_properties("${DES_LIBSRE_DIR}/recomp/libsre_recomp_000.cpp" PROPERTIES
             COMPILE_OPTIONS "-w;-ffp-contract=off")
