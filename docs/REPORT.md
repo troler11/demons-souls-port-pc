@@ -403,6 +403,9 @@ Diagnósticos novos: `LD_PS_TEX0_TC=1|2`, `LD_DRAW_DUMP_FROM=<frame>`, `LD_BIND_
     - **Efeitos Sonoros Nativos de Menu:** A fila de áudio do overlay (`g_des_ui_sound`) despacha requisições para a thread principal do jogo executando o tick per-frame em `des_menu_tick(ppu_context* ctx)` substituindo `func_00724E40`, disparando os cues nativos da tabela `sound/ds_se_main.mosb` via chamada a `0x0072D970` (`func_0072D970(ctx)`).
     - **Correção de Race Condition no Áudio:** Em `cellAudio.c`, `audio_notify_event_queues` agora captura um snapshot seguro das filas de notificação (`s_notify_queues`) sob o mutex de áudio `s_audio_mutex`, eliminando silêncio esporádico no boot frio do jogo.
     - **Variáveis de Ambiente / Knobs:** `DES_UI=1` (ativa o overlay), `DES_UI_START=1` (tela de boot start), `DES_UI_SOUND=1` (SFX de menu), `DES_SKIP_INTRO=1` (redução dos logos de boot), `DES_FPS=<target>` (hook de flip rate).
+88. **Otimizações de Leitura de Canais SPU e Redução de Latência no Polling HighGraphics.**
+    - **Inlining de Canais SPU (`spu_rdch_inl`, `spu_rchcnt_inl` em `spu_helpers.h`):** inlining direto das leituras de canais MFC (`MFC_RdTagStat`, `MFC_RdAtomicStat` e `MFC_RdTagMask`). Elimina despacho out-of-line e overhead de buscas MFC nos loops fechados de sincronização de DMA dos SPUs do SPURS.
+    - **Polling de Baixa Latência em `sys_timer_usleep` (`sys_timer.c`):** adição de loop com `YieldProcessor()` (`_mm_pause`) antes de ceder para `SwitchToThread()` em esperas sub-milissegundo, permitindo que a thread `HighGraphics` detecte a conclusão dos jobs de desenho em poucos microssegundos sem perder o time-slice para o escalonador do Windows.
 
 **Próximo (antigo):** o carregamento do m08 para depois de `sound/ds_se_c2000.mo*` (≈207 arquivos do disco), sempre no mesmo ponto; a tela de loading continua animada.
 
