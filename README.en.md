@@ -78,6 +78,10 @@ In PowerShell, from the repository folder:
 
 ## Playing
 
+The easy way: double-click **`Jogar.bat`**. A window lets you pick the resolution, internal resolution, frame rate, fullscreen, FSR, FXAA, frame generation, sharpening and the cinematics; the choices are remembered. The first time it asks for the RPCS3 folder.
+
+From the command line:
+
 ```powershell
 .\scripts\windows\play.ps1 -Rpcs3 "C:\path\to\rpcs3"   # first time (remembered)
 .\scripts\windows\play.ps1                              # afterwards
@@ -95,7 +99,9 @@ In PowerShell, from the repository folder:
 
 **F11** or **Alt+Enter** toggles between window and fullscreen in game.
 
-**Controller**: an XInput controller (Xbox or compatible) works out of the box, with its buttons in the PS3 controller's positions.
+**Controller**: these work out of the box, with the buttons in the PS3 controller's positions:
+- XInput controllers (Xbox or compatible);
+- **DualShock 4** (PS4) and **DualSense** (PS5), over USB or Bluetooth, read directly, with no DS4Windows or Steam. Share/Create is Select, Options is Start, and a touchpad click is Select too.
 
 **Keyboard** (used when no controller is connected):
 

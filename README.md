@@ -78,6 +78,10 @@ No PowerShell, na pasta do repositório:
 
 ## Jogando
 
+O jeito mais fácil: dê dois cliques em **`Jogar.bat`**. Abre uma janela para escolher resolução, resolução interna, taxa de quadros, tela cheia, FSR, FXAA, frame generation, nitidez e as cinemáticas. As escolhas ficam salvas. Na primeira vez ela pede a pasta do RPCS3.
+
+Pela linha de comando:
+
 ```powershell
 .\scripts\windows\play.ps1 -Rpcs3 "C:\caminho\do\rpcs3"   # da primeira vez (fica lembrado)
 .\scripts\windows\play.ps1                                 # depois
@@ -95,7 +99,9 @@ No PowerShell, na pasta do repositório:
 
 **F11** ou **Alt+Enter** alternam entre janela e tela cheia durante o jogo.
 
-**Controle**: um controle XInput (Xbox ou compatível) funciona direto, com os botões na posição do controle do PS3.
+**Controle**: funcionam direto, com os botões na posição do controle do PS3:
+- controles XInput (Xbox ou compatíveis);
+- **DualShock 4** (PS4) e **DualSense** (PS5), por USB ou Bluetooth, lidos direto, sem DS4Windows nem Steam. Share/Create é Select, Options é Start, e o clique do touchpad também é Select.
 
 **Teclado** (usado quando não há controle):
 

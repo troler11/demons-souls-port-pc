@@ -56,6 +56,7 @@
 | `PAD_SCRIPT=<s>:<botões>,...` | Aperta botões em segundos fixos. `0x4000` ✕, `0x0800` R1, `0x0008` Start. |
 | `PAD_PATH=<t0>-<t1>:lx,ly,rx,ry;...` | Segura os analógicos (0-255, 128 = centro) em cada intervalo. Para frente: `128,0,128,128`. |
 | `PAD_NO_KEYBOARD=1` | Desliga o teclado como controle. |
+| `PAD_NO_HID=1` | Não lê DualShock 4 / DualSense direto (por HID). |
 | `PAD_SCRIPT_MOVIE_HOLD=1` | O `PAD_SCRIPT` não aperta nada enquanto um vídeo toca (assistir inteiro). Até 256 eventos. |
 
 ## Diagnóstico
@@ -78,6 +79,7 @@
 | `SPU_CH_BLOCK=0` | SPUs voltam a girar esperando canais (padrão: dormem; com 6 threads, 13–25 → 45–49 fps em Boletaria). |
 | `FC_SPIN_US` | Giro do `frame_clock` enquanto o jogo desenha (µs). Padrão: 100000 com 10+ processadores lógicos, 0 com menos. |
 | `PS3_USLEEP_MODE=spin\|sleep\|progress` | Como um `usleep` curto espera (padrão `spin`). |
+| `SPU_LLAR_WAIT=1` | SPU que relê a mesma linha atômica sem mudança dorme até alguém gravar nela (desligado: sem ganho medido). |
 | `PS3_THREAD_CPU=<s>` | A cada s segundos, quanto de um núcleo cada thread gastou. |
 | `SPU_LOCK_STRIPES=0` | Volta à trava global única para as atômicas dos SPUs (padrão: 64 travas por linha, +4 fps). |
 | `SPU_LOCK_PROF=1` | A cada 5 s: aquisições/s, % com espera, núcleos esperando/segurando, e quem chama. |
