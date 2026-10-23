@@ -9,7 +9,7 @@ Português (Brasil) · [English](README.en.md)
 Este projeto traduz o código do jogo, do processador principal (PPU) e dos SPUs do PS3, para C++ e o compila para o seu PC, sobre o runtime do [ps3recomp](https://github.com/sp00nznet/ps3recomp). Não é um emulador: é o próprio jogo, recompilado.
 
 > [!WARNING]
-> É um experimento. O jogo inicia e o tutorial é jogável, mas ainda não dá para jogar do começo ao fim, e partes além do tutorial não foram testadas. Só funciona no Windows.
+> É um experimento. O jogo inicia e o tutorial é jogável, mas ainda não dá para jogar do começo ao fim, e as áreas além do tutorial foram testadas só por pouco tempo (com saves de outras pessoas). Só funciona no Windows.
 
 > [!IMPORTANT]
 > **Nenhum dado do jogo está incluído**: nem o código, nem os arquivos do disco, nem o firmware do PS3. Você precisa da sua própria cópia, a versão americana **BLUS30443 (1.00)**, tirada do seu disco, e do firmware oficial do PS3 instalado no RPCS3. Ninguém aqui pode te dar o jogo, o firmware ou chaves. É um projeto de fãs, sem ligação com a Sony Interactive Entertainment, a FromSoftware ou a Bluepoint.
@@ -21,11 +21,12 @@ Outubro de 2026, no Windows:
 - **Do boot ao tutorial**: avisos, menu principal, criação de personagem, cinemática de abertura e o tutorial (corredor, pátio, combate com os hollows, a torre). Os saves funcionam.
 - **Renderizador próprio em Direct3D 12** (o "live draw" do ps3recomp, com as mudanças deste projeto): sombras, névoa, partículas suaves, adaptação de exposição, profundidade de campo e oclusão do sol e dos lens flares.
 - **60 fps**: o patch "Unlock FPS" do RPCS3 (Gibbed e Whatcookie), aplicado como código. O corredor do tutorial fica em ~59 fps e o pátio com combate entre 46 e 59 fps. O modo original de 30 fps (`-Fps30`) fica cravado em 30.
-- **Resolução**: janela de 720p a 4K, e a cena renderizada internamente em até 4× (2560×1440, 3840×2160...) pela GPU, com a CPU praticamente igual (`-Resolution`, `-Scale`).
+- **Resolução**: janela de 720p a 4K, e a cena renderizada internamente em até 4× (2560×1440, 3840×2160...) pela GPU, com a CPU praticamente igual (`-Resolution`, `-Scale`). **AMD FSR 1** (EASU + RCAS) para renderizar menor e ampliar, e **FXAA** (`-Fsr`, `-Fxaa`, `-Sharpen`).
+- **Outras áreas**: com um save de outra pessoa (decriptado e levado a qualquer mundo por `scripts/save_decrypt.py` e `scripts/save_warp.py`), Nexus, Boletaria, Latria, Tempestades e o Vale carregam e jogam.
 - **Cinemáticas em vídeo** (`.pam`), tocadas pelo [ffmpeg](https://ffmpeg.org) com som: a abertura, a tela-título e a introdução da história.
 - **Áudio** completo, sem cortes: músicas, vozes e efeitos (MultiStream + ATRAC, com o codec do seu firmware).
 - **O kernel real do SPURS** (`libsre`, do seu firmware) roda recompilado, não emulado por aproximação.
-- **Problemas conhecidos**: em brigas com muitos inimigos o fps cai para a casa dos 40, porque o limite são os SPUs recompilados, não a placa de vídeo. Algumas partículas podem faltar, e o céu às vezes estoura em áreas externas.
+- **Problemas conhecidos**: o limite é a CPU (o código do PS3 recompilado), não a placa de vídeo: num Ryzen 5 5500, 57–60 fps em Boletaria; numa CPU de 6 threads, ~45 (use `-FrameGen`); com 4 threads, 15–25. Algumas partículas podem faltar, e o céu às vezes estoura em áreas externas.
 
 O diário técnico completo, com cada problema encontrado e como foi resolvido, está em [docs/REPORT.md](docs/REPORT.md).
 
@@ -85,7 +86,12 @@ No PowerShell, na pasta do repositório:
 .\scripts\windows\play.ps1 -Resolution 1080p               # 1080p, 1440p, 4k ou LxA (a cena renderiza em 2x/3x)
 .\scripts\windows\play.ps1 -Resolution 4k -Scale 2         # escolhe a resolução interna (1 a 4x 1280x720)
 .\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # tela cheia sem bordas
+.\scripts\windows\play.ps1 -Resolution 4k -Fsr             # AMD FSR 1: renderiza menor e amplia (GPU mais fraca)
+.\scripts\windows\play.ps1 -Fxaa                           # anti-aliasing FXAA
+.\scripts\windows\play.ps1 -FrameGen                       # frame generation: 60 -> 120 na tela
 ```
+
+**Frame generation** (`-FrameGen`): o jogo é limitado pela CPU e a placa de vídeo fica quase ociosa, então a GPU cria um quadro entre cada dois do jogo, estimando o movimento pelas próprias imagens. A tela mostra o dobro de quadros sem custo de CPU, com meio quadro a mais de atraso. Só faz diferença num monitor acima de 60 Hz. Alternativas no driver: AMD Fluid Motion Frames (Adrenalin, RX 6000/7000+), NVIDIA Smooth Motion (RTX 40/50) ou o Lossless Scaling.
 
 **F11** ou **Alt+Enter** alternam entre janela e tela cheia durante o jogo.
 

@@ -28,6 +28,10 @@
 | `DES_WINDOW=1080p\|1440p\|4k\|LxA` | Tamanho da janela; o quadro é escalado na GPU. |
 | `LD_RES_SCALE=2..4` | Resolução interna: a cena renderiza k× 1280×720. |
 | `DES_FULLSCREEN=1` | Começa em tela cheia sem bordas (F11 / Alt+Enter alternam). |
+| `LD_FSR=1` | AMD FSR 1 quando a cena é menor que a janela: EASU (ampliação que segue as bordas) + RCAS (nitidez). |
+| `LD_FXAA=1` | Anti-aliasing FXAA na imagem do jogo, na resolução interna. |
+| `LD_FRAMEGEN=1` | Frame generation: a GPU estima o movimento entre dois quadros (busca por blocos, sem vetores do jogo) e mostra um quadro intermediário. 60 → 120 na tela, sem custo de CPU; meio quadro de atraso. `2` mostra só os quadros gerados (para avaliar). |
+| `LD_SHARPEN=0..1` | Força do RCAS (1 = máxima). Padrão 0,8 com FSR e 0 sem; funciona também sem FSR. |
 | `LD_ZPACK_SELF=0` | Desliga a profundidade para draws que a leem e testam ao mesmo tempo (névoa, partículas suaves) (57). |
 | `LD_ZPASS=0` | Volta a responder "visível" a toda consulta de oclusão (flares atravessam paredes) (58). |
 | `LD_ZPASS_START=0` | Começa com a contagem de oclusão desligada. |
@@ -71,5 +75,9 @@
 | `SAIL_AUDIO_RAW=<arquivo>` | Grava o som dos vídeos que vai para os alto-falantes (s16le estéreo 48 kHz). |
 | `DES_WATCH=<ea>:<len>:<s>`, `DES_DUMP=<ea>:<len>:<s>` | Vigia/despeja memória do jogo. |
 | `SPU_LLAR_BACKOFF=1` | Experimento (mais lento, desligado). |
+| `SPU_CH_BLOCK=0` | SPUs voltam a girar esperando canais (padrão: dormem; com 6 threads, 13–25 → 45–49 fps em Boletaria). |
+| `FC_SPIN_US` | Giro do `frame_clock` enquanto o jogo desenha (µs). Padrão: 100000 com 10+ processadores lógicos, 0 com menos. |
+| `PS3_USLEEP_MODE=spin\|sleep\|progress` | Como um `usleep` curto espera (padrão `spin`). |
+| `PS3_THREAD_CPU=<s>` | A cada s segundos, quanto de um núcleo cada thread gastou. |
 | `SPU_LOCK_STRIPES=0` | Volta à trava global única para as atômicas dos SPUs (padrão: 64 travas por linha, +4 fps). |
 | `SPU_LOCK_PROF=1` | A cada 5 s: aquisições/s, % com espera, núcleos esperando/segurando, e quem chama. |

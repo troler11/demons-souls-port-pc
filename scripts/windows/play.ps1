@@ -12,10 +12,17 @@
 #                                                          # (default: matches -Resolution)
 #   .\scripts\windows\play.ps1 -Fullscreen                 # borderless fullscreen
 #                                                          # (F11 / Alt+Enter toggle in game)
+#   .\scripts\windows\play.ps1 -Resolution 4k -Fsr         # AMD FSR 1: render smaller (4k: 2x),
+#                                                          # upscale + sharpen on the GPU
+#   .\scripts\windows\play.ps1 -Fxaa                       # FXAA anti-aliasing
+#   .\scripts\windows\play.ps1 -Sharpen 0.5                # RCAS sharpening strength (0-1)
+#   .\scripts\windows\play.ps1 -FrameGen                   # frame generation: the GPU makes a
+#                                                          # frame between each two (60 -> 120)
 #
 # Saves go to work\gamedata\dev_hdd0. The log goes to work\logs\play.err.
 param([string]$Rpcs3 = "", [switch]$Fps30, [switch]$Uncapped, [string]$Resolution = "",
-      [int]$Scale = 0, [switch]$Fullscreen)
+      [int]$Scale = 0, [switch]$Fullscreen, [switch]$Fsr, [switch]$Fxaa, [double]$Sharpen = -1,
+      [switch]$FrameGen)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
 if ($Fps30) { $env:DES_FPS_UNLOCK = "0" }
@@ -27,10 +34,16 @@ if ($Resolution) {
         $h = switch -regex ($Resolution) { '^1080p$' { 1080 } '^(1440p|2k)$' { 1440 } '^(4k|2160p)$' { 2160 }
                                             '^\d+x(\d+)$' { [int]$matches[1] } default { 720 } }
         $Scale = [math]::Min(4, [math]::Ceiling($h / 720.0))
+        # FSR upscales: render ~1.5x smaller than the window ("quality").
+        if ($Fsr) { $Scale = [math]::Max(1, [math]::Round($h / 720.0 / 1.5)) }
     }
 }
 if ($Scale -gt 1) { $env:LD_RES_SCALE = "$Scale" }
 if ($Fullscreen) { $env:DES_FULLSCREEN = "1" }
+if ($Fsr) { $env:LD_FSR = "1" }
+if ($Fxaa) { $env:LD_FXAA = "1" }
+if ($Sharpen -ge 0) { $env:LD_SHARPEN = "$Sharpen" }
+if ($FrameGen) { $env:LD_FRAMEGEN = "1" }
 Set-DesEnv $Rpcs3
 $logs = Join-Path $Work "logs"
 New-Item -ItemType Directory -Force $logs | Out-Null

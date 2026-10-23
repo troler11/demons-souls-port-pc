@@ -171,6 +171,7 @@ extern "C" unsigned ppu_boot_frames_presented(void)
  * backend opens the window and the engine presents into it. */
 extern "C" int   rsx_live_draw_enabled(void);
 extern "C" void  rsx_live_draw_set_output_size(uint32_t w, uint32_t h);
+extern "C" void  rsx_live_draw_framegen_tick(void);
 extern "C" int   rsx_live_draw_init(void* hwnd, uint32_t w, uint32_t h,
                                     const uint8_t* (*guest_ptr)(void*, uint32_t, uint32_t, uint32_t),
                                     void* user);
@@ -335,10 +336,18 @@ static DWORD WINAPI frame_clock(LPVOID)
         /* Default on only with DES_FPS_UNLOCK=1: in the stock 30 fps mode the
          * game steps a fixed 1/30 s per frame, and spinning let it present
          * ~39 frames a second -- a faster game, not a smoother one. */
+        /* And only with 10+ logical processors: on a smaller CPU the spinning
+         * core is one the game's own threads need (Boletaria on 6 threads:
+         * 13-25 fps spinning, 45-49 not). */
         if (spin_us < 0) {
             const char* e = getenv("FC_SPIN_US");
             const char* u = getenv("DES_FPS_UNLOCK");
-            spin_us = e ? atof(e) : (u && *u == '1') ? 100000.0 : 0.0;
+            DWORD_PTR pm = 0, sm = 0; int cpus = 0;
+            if (GetProcessAffinityMask(GetCurrentProcess(), &pm, &sm))
+                for (; pm; pm &= pm - 1) cpus++;
+            spin_us = e ? atof(e) : (u && *u == '1' && cpus >= 10) ? 100000.0 : 0.0;
+            fprintf(stderr, "[frame_clock] %d logical processors: %s while the game renders\n",
+                    cpus, spin_us > 0 ? "spin" : "sleep");
         }
         if (spin_us > 0 && vm_base) {
             uint32_t put; memcpy(&put, vm_base + 0x20002000u, 4);
@@ -367,6 +376,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             }
         }
         const double now_us = (double)ps3_qpc_us();
+        if (s_rsx_live) rsx_live_draw_framegen_tick();   /* LD_FRAMEGEN: the held real frame */
 
         int fired = 0;
         while (now_us >= next_tick_us && fired < 240) {

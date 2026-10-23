@@ -11,7 +11,10 @@
 # -Save restores that savedata folder first, so every run starts in the same
 # place (the game autosaves; without it each run continues the last one).
 # Logs: work\logs\<Tag>.out / .err ([fps] lines every 5 s).
-param([int]$Seconds = 120, [string]$Tag = "run", [string]$Route = "menus", [string]$Save = "")
+# -Threads N runs the game on the first N logical processors only: a stand-in
+# for a smaller CPU.
+param([int]$Seconds = 120, [string]$Tag = "run", [string]$Route = "menus", [string]$Save = "",
+      [int]$Threads = 0)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
 # Tests skip the movies unless asked (SAIL_HOST_PLAY=1): minutes saved per run.
@@ -37,6 +40,7 @@ New-Item -ItemType Directory -Force $logs | Out-Null
 $out = "$logs\$Tag.out"; $err = "$logs\$Tag.err"
 $p = Start-Process -FilePath $Exe -ArgumentList "`"$Eboot`"" -WorkingDirectory $Work `
     -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+if ($Threads -gt 0) { $p.ProcessorAffinity = [IntPtr]([long][math]::Pow(2, $Threads) - 1) }
 if (-not $p.WaitForExit($Seconds * 1000)) { Stop-Process $p -Force; "still running after ${Seconds}s (stopped)" }
 else { "exited with $($p.ExitCode)" }
 $fps = Select-String -Path $err -Pattern '^\[fps\] ([0-9.]+)' | Select-Object -Last 12 | ForEach-Object { $_.Matches[0].Groups[1].Value }

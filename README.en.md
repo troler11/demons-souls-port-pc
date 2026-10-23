@@ -9,7 +9,7 @@
 This project translates the game's code, both the PS3's main processor (PPU) and its SPUs, into C++ and compiles it for your PC, on top of the [ps3recomp](https://github.com/sp00nznet/ps3recomp) runtime. It is not an emulator: it is the game itself, recompiled.
 
 > [!WARNING]
-> This is an experiment. The game boots and the tutorial is playable, but you can't play it start to finish yet, and nothing past the tutorial has been tested. Windows only.
+> This is an experiment. The game boots and the tutorial is playable, but you can't play it start to finish yet, and the areas past the tutorial have only been tried briefly (with other people's saves). Windows only.
 
 > [!IMPORTANT]
 > **No game data is included**: no code, no disc files, no PS3 firmware. You need your own copy, the US release **BLUS30443 (1.00)**, dumped from your own disc, and the official PS3 firmware installed in RPCS3. Nobody here can give you the game, the firmware or keys. Fan project, not affiliated with Sony Interactive Entertainment, FromSoftware or Bluepoint.
@@ -21,11 +21,12 @@ October 2026, on Windows:
 - **Boot to tutorial**: notices, main menu, character creation, opening cinematic and the tutorial (corridor, courtyard, fighting the hollows, the tower). Saves work.
 - **Its own Direct3D 12 renderer** (ps3recomp's "live draw" with this project's changes): shadows, fog, soft particles, eye adaptation, depth of field, and occlusion for the sun and lens flares.
 - **60 fps**: RPCS3's "Unlock FPS" patch (Gibbed and Whatcookie), applied as code. The tutorial corridor holds ~59 fps and the courtyard fight 46-59 fps. The stock 30 fps mode (`-Fps30`) stays locked at 30.
-- **Resolution**: a 720p to 4K window, with the scene rendered internally at up to 4x (2560x1440, 3840x2160...) on the GPU at about the same CPU cost (`-Resolution`, `-Scale`).
+- **Resolution**: a 720p to 4K window, with the scene rendered internally at up to 4x (2560x1440, 3840x2160...) on the GPU at about the same CPU cost (`-Resolution`, `-Scale`). **AMD FSR 1** (EASU + RCAS) to render smaller and upscale, and **FXAA** (`-Fsr`, `-Fxaa`, `-Sharpen`).
+- **Other areas**: with someone else's save (decrypted and moved to any world by `scripts/save_decrypt.py` and `scripts/save_warp.py`), the Nexus, Boletaria, Latria, the Shrine of Storms and the Valley load and play.
 - **Video cinematics** (`.pam`), played through [ffmpeg](https://ffmpeg.org) with sound: the opening, the title screen and the story intro.
 - **Audio** complete and clean: music, voices and effects (MultiStream + ATRAC, using the codec from your firmware).
 - **The real SPURS kernel** (`libsre`, from your firmware) runs recompiled rather than approximated.
-- **Known issues**: fights with many enemies drop into the 40s, because the limit is the recompiled SPU code, not the GPU. Some particles may be missing, and the sky sometimes blows out in outdoor areas.
+- **Known issues**: the limit is the CPU (the recompiled PS3 code), not the GPU: on a Ryzen 5 5500, 57-60 fps in Boletaria; on a 6-thread CPU, ~45 (use `-FrameGen`); with 4 threads, 15-25. Some particles may be missing, and the sky sometimes blows out in outdoor areas.
 
 The full technical diary (in Portuguese), with every problem found and how it was solved: [docs/REPORT.md](docs/REPORT.md).
 
@@ -85,7 +86,12 @@ In PowerShell, from the repository folder:
 .\scripts\windows\play.ps1 -Resolution 1080p            # 1080p, 1440p, 4k or WxH (the scene renders at 2x/3x)
 .\scripts\windows\play.ps1 -Resolution 4k -Scale 2      # pick the internal resolution (1-4x 1280x720)
 .\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # borderless fullscreen
+.\scripts\windows\play.ps1 -Resolution 4k -Fsr             # AMD FSR 1: render smaller and upscale (weaker GPUs)
+.\scripts\windows\play.ps1 -Fxaa                           # FXAA anti-aliasing
+.\scripts\windows\play.ps1 -FrameGen                       # frame generation: 60 -> 120 on screen
 ```
+
+**Frame generation** (`-FrameGen`): the game is CPU bound and the GPU mostly idle, so the GPU makes a frame between each two the game renders, estimating motion from the images themselves. Twice the frames on screen at no CPU cost, with half a frame of extra latency; it only matters on a display faster than 60 Hz. Driver alternatives: AMD Fluid Motion Frames (Adrenalin, RX 6000/7000+), NVIDIA Smooth Motion (RTX 40/50) or Lossless Scaling.
 
 **F11** or **Alt+Enter** toggles between window and fullscreen in game.
 

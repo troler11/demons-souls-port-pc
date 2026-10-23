@@ -25,3 +25,9 @@ savedata/
 *.out
 __pycache__/
 .vs/
+
+# Save files and keys
+*.DAT
+*.PFD
+*.SFO
+keys.conf
