@@ -27,6 +27,7 @@
 |---|---|
 | `DES_WINDOW=1080p\|1440p\|4k\|LxA` | Tamanho da janela; o quadro é escalado na GPU. |
 | `LD_RES_SCALE=2..4` | Resolução interna: a cena renderiza k× 1280×720. |
+| `DES_FULLSCREEN=1` | Começa em tela cheia sem bordas (F11 / Alt+Enter alternam). |
 | `LD_ZPACK_SELF=0` | Desliga a profundidade para draws que a leem e testam ao mesmo tempo (névoa, partículas suaves) (57). |
 | `LD_ZPASS=0` | Volta a responder "visível" a toda consulta de oclusão (flares atravessam paredes) (58). |
 | `LD_ZPASS_START=0` | Começa com a contagem de oclusão desligada. |

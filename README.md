@@ -84,7 +84,10 @@ No PowerShell, na pasta do repositório:
 .\scripts\windows\play.ps1 -Uncapped                       # sem limite de 60 fps (experimental)
 .\scripts\windows\play.ps1 -Resolution 1080p               # 1080p, 1440p, 4k ou LxA (a cena renderiza em 2x/3x)
 .\scripts\windows\play.ps1 -Resolution 4k -Scale 2         # escolhe a resolução interna (1 a 4x 1280x720)
+.\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # tela cheia sem bordas
 ```
+
+**F11** ou **Alt+Enter** alternam entre janela e tela cheia durante o jogo.
 
 **Controle**: um controle XInput (Xbox ou compatível) funciona direto, com os botões na posição do controle do PS3.
 

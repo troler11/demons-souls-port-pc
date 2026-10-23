@@ -84,7 +84,10 @@ In PowerShell, from the repository folder:
 .\scripts\windows\play.ps1 -Uncapped                    # no 60 fps cap (experimental)
 .\scripts\windows\play.ps1 -Resolution 1080p            # 1080p, 1440p, 4k or WxH (the scene renders at 2x/3x)
 .\scripts\windows\play.ps1 -Resolution 4k -Scale 2      # pick the internal resolution (1-4x 1280x720)
+.\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # borderless fullscreen
 ```
+
+**F11** or **Alt+Enter** toggles between window and fullscreen in game.
 
 **Controller**: an XInput controller (Xbox or compatible) works out of the box, with its buttons in the PS3 controller's positions.
 

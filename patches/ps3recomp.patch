@@ -2074,7 +2074,7 @@ index 4e175d2..b537981 100644
       * array declaration so 2D-only programs are byte-identical. When any unit
       * is a cubemap, declare each unit individually at its t-register so the
 diff --git a/libs/video/rsx_live_draw.c b/libs/video/rsx_live_draw.c
-index 9e3996b..b2064ff 100644
+index 9e3996b..0575ca0 100644
 --- a/libs/video/rsx_live_draw.c
 +++ b/libs/video/rsx_live_draw.c
 @@ -36,6 +36,8 @@ void rsx_live_draw_set_display_buffer(
@@ -4143,7 +4143,16 @@ index 9e3996b..b2064ff 100644
      scd.SampleDesc.Count = 1; scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
      scd.BufferCount = LD_SWAP_BUFFERS; scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
      IDXGISwapChain1* sc1 = NULL;
-@@ -8099,7 +9423,7 @@ void rsx_live_draw_set_display_buffer(
+@@ -7933,6 +9257,8 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
+         factory->lpVtbl->Release(factory); return -1;
+     }
+     sc1->lpVtbl->QueryInterface(sc1, &IID_IDXGISwapChain3, (void**)&g.swap);
++    /* Alt+Enter is the window's borderless toggle, not DXGI exclusive mode. */
++    factory->lpVtbl->MakeWindowAssociation(factory, (HWND)hwnd, DXGI_MWA_NO_ALT_ENTER);
+     sc1->lpVtbl->Release(sc1);
+     factory->lpVtbl->Release(factory);
+ 
+@@ -8099,7 +9425,7 @@ void rsx_live_draw_set_display_buffer(
              buffer_id, location, offset, pitch, width, height);
  }
  
@@ -4152,7 +4161,7 @@ index 9e3996b..b2064ff 100644
  {
      /* Bounded ingress trace for the a010 live-vs-capture comparison.  Keep the
       * raw method (including its FIFO subchannel bits) visible: if an SPU-built
-@@ -8171,10 +9495,26 @@ void rsx_live_draw_method(u32 method, u32 arg)
+@@ -8171,10 +9497,26 @@ void rsx_live_draw_method(u32 method, u32 arg)
              g_ld_movie_track_rsx = getenv("RSX_MOVIE_TRACK") ? 1 : 0;
          if (!g_ld_movie_track_rsx) return;
      }
@@ -4180,7 +4189,7 @@ index 9e3996b..b2064ff 100644
  {
      static unsigned long long suppressed_at_start = 0;
      const int composite = ld_movie_composite_ui_enabled();
-@@ -8348,7 +9688,53 @@ void rsx_live_draw_dump_present_samples(void)
+@@ -8348,7 +9690,53 @@ void rsx_live_draw_dump_present_samples(void)
   * swap-chain backbuffer (both R8G8B8A8_UNORM at the swap size) and Present.
   * The frame is clamped to the backbuffer size. Call from a single thread with
   * movie mode on (so guest draws don't touch g.list). */
@@ -4235,7 +4244,7 @@ index 9e3996b..b2064ff 100644
  {
      const int composite = ld_movie_composite_ui_enabled();
      const int serialized = composite || g_ld_debug_layer_enabled;
-@@ -8412,6 +9798,31 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
+@@ -8412,6 +9800,31 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
          }
      }
  
@@ -4267,7 +4276,7 @@ index 9e3996b..b2064ff 100644
      const u32 bbi = g.swap->lpVtbl->GetCurrentBackBufferIndex(g.swap);
      ID3D12Resource* bb = g.backbuf[bbi];
  
-@@ -8439,9 +9850,11 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
+@@ -8439,9 +9852,11 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
      b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
      g.list->lpVtbl->ResourceBarrier(g.list, 1, &b);
  
@@ -4280,7 +4289,7 @@ index 9e3996b..b2064ff 100644
          if (SUCCEEDED(present_hr))
              ld_present_measure_record(g_ld_frames);
          else {
-@@ -8467,6 +9880,15 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
+@@ -8467,6 +9882,15 @@ void rsx_live_draw_present_rgba(const uint8_t* rgba, u32 w, u32 h)
  static void ld_dump_texel_rgb(const u8* p, int fp16, u8* out)
  {
      if (!fp16) { out[0] = p[0]; out[1] = p[1]; out[2] = p[2]; return; }
@@ -4296,7 +4305,7 @@ index 9e3996b..b2064ff 100644
      for (int c = 0; c < 3; c++) {
          const u16 h = (u16)(p[c * 2] | (p[c * 2 + 1] << 8));
          const int ex = (h >> 10) & 0x1F, ma = h & 0x3FF;
-@@ -8483,6 +9905,178 @@ static void ld_dump_texel_rgb(const u8* p, int fp16, u8* out)
+@@ -8483,6 +9907,178 @@ static void ld_dump_texel_rgb(const u8* p, int fp16, u8* out)
      }
  }
  
@@ -4475,7 +4484,7 @@ index 9e3996b..b2064ff 100644
  /* --record: when set, ld_dump_surface_ppm appends to this ffmpeg pipe instead
   * of opening `path`, and skips its per-dump diagnostics (every frame goes
   * through here while recording). */
-@@ -8492,11 +10086,13 @@ static u64 ld_dump_surface_ppm(const char* path, const surface_t* surface)
+@@ -8492,11 +10088,13 @@ static u64 ld_dump_surface_ppm(const char* path, const surface_t* surface)
  {
      ID3D12Resource* rt = surface ? surface->tex : NULL;
      if (!rt) return UINT64_MAX;
@@ -4493,7 +4502,7 @@ index 9e3996b..b2064ff 100644
      const u32 pitch = (width * texel + 255) & ~255u;             /* 256-align */
      const UINT64 rb_size = (UINT64)pitch * height;
  
-@@ -8758,9 +10354,15 @@ static void ld_vertex_diag_emit(const char* reason, int dump_surface)
+@@ -8758,9 +10356,15 @@ static void ld_vertex_diag_emit(const char* reason, int dump_surface)
      fflush(stderr);
  }
  
@@ -4510,7 +4519,7 @@ index 9e3996b..b2064ff 100644
  
      /* LD_SURF_DUMP=<dir>: dump EVERY live surface once, with its non-black
       * count, at LD_SURF_DUMP_FRAME (default 1200).
-@@ -8961,6 +10563,11 @@ void rsx_live_draw_present(u32 buffer_id)
+@@ -8961,6 +10565,11 @@ void rsx_live_draw_present(u32 buffer_id)
      ID3D12Resource* srcimg = presented_surface->tex;
      const u32 bbi = g.swap->lpVtbl->GetCurrentBackBufferIndex(g.swap);
      ID3D12Resource* bb = g.backbuf[bbi];
@@ -4522,7 +4531,7 @@ index 9e3996b..b2064ff 100644
  
      D3D12_RESOURCE_BARRIER bar[2] = {0};
      bar[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-@@ -8983,9 +10590,12 @@ void rsx_live_draw_present(u32 buffer_id)
+@@ -8983,9 +10592,12 @@ void rsx_live_draw_present(u32 buffer_id)
      bar[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
      g.list->lpVtbl->ResourceBarrier(g.list, 2, bar);
  
@@ -4536,7 +4545,7 @@ index 9e3996b..b2064ff 100644
          if (SUCCEEDED(present_hr))
              ld_present_measure_record(g_ld_frames + 1u);
          else {
-@@ -9834,9 +11444,13 @@ void rsx_live_draw_present(u32 buffer_id)
+@@ -9834,9 +11446,13 @@ void rsx_live_draw_present(u32 buffer_id)
      }
  #endif
  
@@ -4553,7 +4562,7 @@ index 9e3996b..b2064ff 100644
  #if !defined(YZ_PERF_CLEAN)
      g_ld_frame_vertex_constant_ring_recycles = 0;
  #endif
-@@ -10106,4 +11720,43 @@ void rsx_live_draw_shutdown(void)
+@@ -10106,4 +11722,43 @@ void rsx_live_draw_shutdown(void)
      if (dc.cuts) { free(dc.cuts); dc.cuts = NULL; dc.cap_cuts = 0; }
  }
  
@@ -4613,6 +4622,69 @@ index 1c3fd72..e944567 100644
  
  /* Publish the FIFO bounds associated with the next flip method.  The live
   * consumer calls this only for driver-queue methods; ordinary method traffic
+diff --git a/libs/video/rsx_null_backend.c b/libs/video/rsx_null_backend.c
+index 32e8a95..0f9f3f5 100644
+--- a/libs/video/rsx_null_backend.c
++++ b/libs/video/rsx_null_backend.c
+@@ -8,6 +8,7 @@
+ 
+ #include "rsx_null_backend.h"
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "../../runtime/ps3_log.h"
+ 
+@@ -52,6 +53,30 @@ static NullBackendState s_state;
+ 
+ static int s_present_suppressed = 0;
+ 
++/* Borderless fullscreen on the window's monitor (F11 or Alt+Enter; and
++ * DES_FULLSCREEN=1 at start). The swap chain keeps its size and is stretched
++ * by the compositor. */
++static void null_toggle_fullscreen(HWND hwnd)
++{
++    static int fs; static LONG_PTR style; static RECT saved;
++    if (!fs) {
++        MONITORINFO mi = {sizeof mi};
++        if (!GetMonitorInfoA(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) return;
++        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
++        GetWindowRect(hwnd, &saved);
++        SetWindowLongPtrA(hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
++        SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
++                     mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
++                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
++        fs = 1;
++    } else {
++        SetWindowLongPtrA(hwnd, GWL_STYLE, style);
++        SetWindowPos(hwnd, NULL, saved.left, saved.top, saved.right - saved.left, saved.bottom - saved.top,
++                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_NOZORDER);
++        fs = 0;
++    }
++}
++
+ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+ {
+     switch (msg) {
+@@ -92,7 +117,11 @@ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+         return 0;
+     }
+ 
++    case WM_SYSKEYDOWN:
++        if (wp == VK_RETURN && (lp & (1 << 29))) { null_toggle_fullscreen(hwnd); return 0; }
++        break;
+     case WM_KEYDOWN:
++        if (wp == VK_F11) { null_toggle_fullscreen(hwnd); return 0; }
+         if (wp == VK_ESCAPE) {
+             s_state.window_closed = 1;
+             DestroyWindow(hwnd);
+@@ -265,6 +294,7 @@ int rsx_null_backend_init(u32 width, u32 height, const char* title)
+     }
+ 
+     s_state.hdc = GetDC(s_state.hwnd);
++    { const char* e = getenv("DES_FULLSCREEN"); if (e && *e == '1') null_toggle_fullscreen(s_state.hwnd); }
+     s_state.last_fps_time = GetTickCount64();
+     snprintf(s_state.title, sizeof(s_state.title), "%s", title ? title : "ps3recomp");
+     s_state.title_time = s_state.last_fps_time;
 diff --git a/libs/video/rsx_vertex_compact.c b/libs/video/rsx_vertex_compact.c
 index 4334f16..ff11b25 100644
 --- a/libs/video/rsx_vertex_compact.c

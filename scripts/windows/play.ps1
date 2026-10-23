@@ -10,10 +10,12 @@
 #   .\scripts\windows\play.ps1 -Resolution 4k -Scale 3     # internal resolution: the
 #                                                          # scene renders 1..4x 1280x720
 #                                                          # (default: matches -Resolution)
+#   .\scripts\windows\play.ps1 -Fullscreen                 # borderless fullscreen
+#                                                          # (F11 / Alt+Enter toggle in game)
 #
 # Saves go to work\gamedata\dev_hdd0. The log goes to work\logs\play.err.
 param([string]$Rpcs3 = "", [switch]$Fps30, [switch]$Uncapped, [string]$Resolution = "",
-      [int]$Scale = 0)
+      [int]$Scale = 0, [switch]$Fullscreen)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
 if ($Fps30) { $env:DES_FPS_UNLOCK = "0" }
@@ -28,6 +30,7 @@ if ($Resolution) {
     }
 }
 if ($Scale -gt 1) { $env:LD_RES_SCALE = "$Scale" }
+if ($Fullscreen) { $env:DES_FULLSCREEN = "1" }
 Set-DesEnv $Rpcs3
 $logs = Join-Path $Work "logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
