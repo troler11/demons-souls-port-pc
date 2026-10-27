@@ -9378,7 +9378,7 @@ index d9ce0c3..3fa7941 100644
      uint64_t r = fn(ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], ctx->gpr[6],
                      ctx->gpr[7], ctx->gpr[8], ctx->gpr[9], ctx->gpr[10]);
 diff --git a/runtime/ppu/ppu_loader.cpp b/runtime/ppu/ppu_loader.cpp
-index 1baea72..c248c9f 100644
+index 1baea72..dc0e813 100644
 --- a/runtime/ppu/ppu_loader.cpp
 +++ b/runtime/ppu/ppu_loader.cpp
 @@ -471,6 +471,17 @@ static uint32_t samp_lookup(uintptr_t rip)
@@ -9468,7 +9468,7 @@ index 1baea72..c248c9f 100644
                  s_samp_total ? 100.0 * (double)best / (double)s_samp_total : 0.0,
                  (unsigned long long)best);
          s_rva_ct[bi] = 0;
-@@ -632,9 +686,209 @@ static uint32_t samp_stack_guest(HANDLE h, const CONTEXT* c)
+@@ -632,9 +686,341 @@ static uint32_t samp_stack_guest(HANDLE h, const CONTEXT* c)
      return 0;
  }
  
@@ -9639,6 +9639,138 @@ index 1baea72..c248c9f 100644
 +    fflush(stderr);
 +}
 +
++/* ---- PS3_HANG_DUMP=<seconds>: a frozen game, explained -------------------
++ * The Nexus freeze (docs/STUTTER_FOLLOWUP.md) stops presenting for seconds to
++ * minutes, intermittently, with audio and the FIFO still running; samples
++ * taken by hand afterwards could not say who waits for whom. This watches the
++ * guest flip count and, when it stands still for the given time, dumps once
++ * per stall (3 at most): every host thread's native stack, frames named from
++ * the link map (guest func_ / spu_ functions and runtime ones). Every
++ * blocked guest thread shows the syscall it waits in (sys_cond_wait,
++ * sys_event_queue_receive, ...) and the guest functions that called it. */
++extern "C" unsigned ppu_boot_frames_presented(void);
++extern "C" void evq_hang_report(void);
++extern "C" uint32_t hang_watch_line(void);
++extern "C" void hang_trace(char k, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
++static void hang_frame_name(uintptr_t pc, uintptr_t base, uintptr_t end, char* out, size_t cap)
++{
++    if (pc >= base && pc < end) {
++        const SuSym* s = su_sym((uint32_t)(pc - base));
++        if (s) {
++            const char* n = s->name; const char* q = n[0] == '?' ? n + 1 : n;
++            const char* at = strstr(q, "@@");
++            const size_t len = at ? (size_t)(at - q) : strlen(q);
++            snprintf(out, cap, "%.*s+0x%X", (int)(len < 120 ? len : 120), q,
++                     (unsigned)((pc - base) - s->rva));
++            return;
++        }
++    }
++    HMODULE m = NULL; char mod[MAX_PATH] = "?";
++    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++                           (LPCSTR)pc, &m) && m) {
++        GetModuleFileNameA(m, mod, sizeof mod);
++        const char* b = strrchr(mod, '\\');
++        snprintf(out, cap, "%s+0x%llX", b ? b + 1 : mod, (unsigned long long)(pc - (uintptr_t)m));
++        return;
++    }
++    snprintf(out, cap, "0x%llX", (unsigned long long)pc);
++}
++static void hang_dump_host_threads(void)
++{
++    static uintptr_t base, end;
++    if (!base) {
++        base = (uintptr_t)GetModuleHandleA(NULL);
++        const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)(base + ((const IMAGE_DOS_HEADER*)base)->e_lfanew);
++        end = base + nt->OptionalHeader.SizeOfImage;
++    }
++    typedef HRESULT (WINAPI *desc_fn)(HANDLE, PWSTR*);
++    static desc_fn get_desc = (desc_fn)GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetThreadDescription");
++    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
++    if (snap == INVALID_HANDLE_VALUE) return;
++    THREADENTRY32 te; te.dwSize = sizeof te;
++    const DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
++    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
++        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
++        HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, FALSE, te.th32ThreadID);
++        if (!h) continue;
++        char name[96] = "";
++        PWSTR w = NULL;
++        if (get_desc && SUCCEEDED(get_desc(h, &w)) && w) {
++            WideCharToMultiByte(CP_UTF8, 0, w, -1, name, sizeof name, NULL, NULL); LocalFree(w);
++        }
++        uintptr_t pcs[16]; int np = 0;
++        if (SuspendThread(h) != (DWORD)-1) {
++            CONTEXT c; c.ContextFlags = CONTEXT_FULL;
++            if (GetThreadContext(h, &c)) {
++                __try {
++                    for (int depth = 0; depth < 32 && np < 16 && c.Rip; depth++) {
++                        pcs[np++] = (uintptr_t)c.Rip;
++                        DWORD64 img = 0;
++                        RUNTIME_FUNCTION* rf = RtlLookupFunctionEntry(c.Rip, &img, NULL);
++                        if (!rf) { c.Rip = *(const DWORD64*)c.Rsp; c.Rsp += 8; continue; }
++                        void* hd = NULL; DWORD64 fr = 0;
++                        RtlVirtualUnwind(UNW_FLAG_NHANDLER, img, c.Rip, rf, &c, &hd, &fr, NULL);
++                    }
++                } __except (EXCEPTION_EXECUTE_HANDLER) {}
++            }
++            ResumeThread(h);           /* resolve names after: lookups may take locks */
++        }
++        CloseHandle(h);
++        char line[4096]; int n = snprintf(line, sizeof line, "[hang] thread %lu '%s':", te.th32ThreadID, name);
++        for (int i = 0; i < np && n < (int)sizeof line - 200; i++) {
++            char f[200]; hang_frame_name(pcs[i], base, end, f, sizeof f);
++            n += snprintf(line + n, sizeof line - n, "%s %s", i ? " <" : "", f);
++        }
++        fprintf(stderr, "%s\n", line);
++    }
++    CloseHandle(snap);
++}
++static DWORD WINAPI hang_watch_thread(LPVOID p)
++{
++    const unsigned secs = (unsigned)(uintptr_t)p;
++    unsigned last = ppu_boot_frames_presented();
++    ULONGLONG since = GetTickCount64();
++    int dumps = 0, armed = 1;
++    for (;;) {
++        Sleep(250);
++        const unsigned f = ppu_boot_frames_presented();
++        const ULONGLONG now = GetTickCount64();
++        { static ULONGLONG beat; if (getenv("PS3_HANG_BEAT") && now - beat >= 10000) {
++              beat = now; fprintf(stderr, "[hang] beat: frame %u, unchanged for %.1f s\n", f, (now - since) / 1000.0); } }
++        /* PS3_HANG_TEST=<s>: one forced dump that many seconds after the
++         * first frame, to check the dump itself. */
++        { static ULONGLONG first; static int forced; static long test = -1;
++          if (test < 0) { const char* e = getenv("PS3_HANG_TEST"); test = e ? atol(e) : 0; }
++          if (f && !first) first = now;
++          if (test > 0 && !forced && first && now - first >= (ULONGLONG)test * 1000ull) {
++              forced = 1;
++              fprintf(stderr, "\n[hang] ==== forced dump (PS3_HANG_TEST), frame %u ====\n", f);
++              su_load_map(); hang_dump_host_threads(); evq_hang_report();
++              fprintf(stderr, "[hang] ==== end of dump ====\n"); fflush(stderr);
++          } }
++        if (f != last) {
++            if (!armed) fprintf(stderr, "[hang] frames resumed after %.1f s (frame %u)\n", (now - since) / 1000.0, f);
++            last = f; since = now; armed = 1; continue;
++        }
++        if (!f || !armed || dumps >= 3 || now - since < secs * 1000ull) continue;
++        armed = 0; dumps++;
++        fprintf(stderr, "\n[hang] ==== no guest frame for %u s (frame %u, dump %d/3) ====\n", secs, f, dumps);
++        su_load_map();
++        hang_dump_host_threads();
++        evq_hang_report();
++        fprintf(stderr, "[hang] ==== end of dump ====\n");
++        fflush(stderr);
++    }
++}
++static struct HangWatchInit {
++    HangWatchInit() {
++        const char* e = getenv("PS3_HANG_DUMP");
++        const int s = e ? atoi(e) : 0;
++        if (s > 0 && CreateThread(NULL, 0, hang_watch_thread, (LPVOID)(uintptr_t)s, 0, NULL))
++            fprintf(stderr, "[hang] watch armed: dump after %d s without a guest frame\n", s);
++    }
++} s_hang_watch_init;
++
 +/* The unwind mode's loop: one thread, its handle kept open, and the interval
 + * from a high-resolution timer with random jitter (0.5-1.5 x the period).
 + * The general loop sleeps with Sleep(), which wakes on the 15.6 ms scheduler
@@ -9678,7 +9810,7 @@ index 1baea72..c248c9f 100644
      DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
      /* Report early and often at first, then settle. Every profile so far was
       * taken in the steady state -- long after the R3000 stopped dispatching --
-@@ -656,18 +910,33 @@ static DWORD WINAPI samp_thread(LPVOID p)
+@@ -656,18 +1042,33 @@ static DWORD WINAPI samp_thread(LPVOID p)
                                        FALSE, te.th32ThreadID);
                  if (!h) continue;
                  if (SuspendThread(h) != (DWORD)-1) {
@@ -9713,7 +9845,7 @@ index 1baea72..c248c9f 100644
                  }
                  CloseHandle(h);
              } while (Thread32Next(snap, &te));
-@@ -677,7 +946,7 @@ static DWORD WINAPI samp_thread(LPVOID p)
+@@ -677,7 +1078,7 @@ static DWORD WINAPI samp_thread(LPVOID p)
          if (GetTickCount64() >= next_report) {
              fprintf(stderr, "[samp] --- report at t=%llums ---\n",
                      (unsigned long long)(GetTickCount64() - t0));
@@ -9722,7 +9854,7 @@ index 1baea72..c248c9f 100644
              if (ei + 1 < sizeof early / sizeof early[0]) { ei++; next_report = t0 + early[ei]; }
              else next_report = GetTickCount64() + 10000;
          }
-@@ -727,9 +996,108 @@ static void ppu_poke_start(void)
+@@ -727,9 +1128,108 @@ static void ppu_poke_start(void)
      CreateThread(NULL, 0, poke_thread, (LPVOID)(uintptr_t)ea, 0, NULL);
  }
  
@@ -9831,7 +9963,7 @@ index 1baea72..c248c9f 100644
      const char* e = getenv("PS3_SAMPLE");
      if (!e) return;
      unsigned ms = (unsigned)atoi(e); if (!ms) ms = 5;
-@@ -753,6 +1121,8 @@ void ps3_sampler_start(void)
+@@ -753,6 +1253,8 @@ void ps3_sampler_start(void)
  }
  #else
  void ps3_sampler_start(void) {}
@@ -9840,7 +9972,7 @@ index 1baea72..c248c9f 100644
  #endif
  
  #endif
-@@ -770,6 +1140,8 @@ extern "C" void ppu_log_host_chain(const char* tag);  /* fwd decl (defined below
+@@ -770,6 +1272,8 @@ extern "C" void ppu_log_host_chain(const char* tag);  /* fwd decl (defined below
  extern "C" int  spu_coh_is_reserved(uint32_t addr);
  extern "C" void spu_lockline_lock(void);
  extern "C" void spu_lockline_unlock(void);
@@ -9849,12 +9981,68 @@ index 1baea72..c248c9f 100644
  extern "C" void spu_coh_notify_write(uint32_t addr);
  
  /* ---------------------------------------------------------------------------
-@@ -950,12 +1322,12 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
+@@ -880,6 +1384,31 @@ extern "C" void ppu_resv_break_store(uint64_t ea)
+             c->reserve_addr = PPU_RESV_INVALID;
+     }
+ }
++/* A write by another agent anywhere in a 128-byte line breaks every PPU
++ * reservation in that line: on the Cell the reservation granule is the cache
++ * line, not the word. Reservations here were checked per word (and the CAS
++ * compares only that word), so an SPU committing to a NEIGHBOUR word of the
++ * line between a lwarx and its stwcx. left the stwcx. succeeding on stale
++ * information. That is the Nexus freeze (docs/STUTTER_FOLLOWUP.md, caught with
++ * PS3_HANG_DUMP + HANG_WATCH_LINE): cellSpursQueuePopBody read the push index
++ * mid-push (still marked busy), an SPU then finished the push seeing no
++ * waiter, and the PPU's stwcx. of its "waiting" mark went through anyway --
++ * it slept on a queue with an item in it, and no wake-up was ever sent.
++ *
++ * Called from spu_coh_notify_write*, i.e. for every committed write to a line
++ * an SPU has reserved (PUTLLC, PUTLLUC, DMA put, a coherent PPU store), under
++ * that line's lock-line lock -- the lock ppu_stwcx32/stdcx64 now hold across
++ * their own recheck and CAS. */
++extern "C" void ppu_resv_break_line(uint32_t line)
++{
++    line &= ~127u;
++    long n = g_resv_ctx_n; if (n > PPU_RESV_MAX) n = PPU_RESV_MAX;
++    for (long i = 0; i < n; i++) {
++        ppu_context* c = g_resv_ctxs[i];
++        if (c && c->reserve_addr < PPU_RESV_INVALID && ((uint32_t)c->reserve_addr & ~127u) == line)
++            c->reserve_addr = PPU_RESV_INVALID;
++    }
++}
+ static inline volatile LONG* resv_slot(uint64_t ea) { return &g_resv_locks[((uint32_t)ea >> 4) & (PPU_RESV_LOCKS - 1)]; }
+ static inline void resv_lock(volatile LONG* L)   { while (_InterlockedExchange(L, 1)) { while (*L) YieldProcessor(); } }
+ static inline void resv_unlock(volatile LONG* L) { _InterlockedExchange(L, 0); }
+@@ -934,12 +1463,19 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
+     if (resv_diag() && self) resv_check_reg(self);
+     volatile LONG* L = resv_slot(ea);
+     resv_lock(L);
+-    if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }   /* reservation lost */
+-    /* On a line an SPU has reserved, take the lock-line lock around the CAS and
+-     * notify: the same serialization the coherent stores use, so a PPU commit
+-     * cannot land inside an SPU PUTLLC's compare/commit window (nor the
+-     * reverse), and the reserving SPU gets its lost-reservation event. */
++    /* On a line an SPU has reserved, take the lock-line lock around the
++     * reservation re-check and the CAS, and notify: the same serialization the
++     * coherent stores use, so a PPU commit cannot land inside an SPU PUTLLC's
++     * compare/commit window (nor the reverse), the reserving SPU gets its
++     * lost-reservation event, and an SPU commit to this line (which breaks
++     * this reservation, ppu_resv_break_line) cannot slip in between the
++     * re-check and the CAS. */
+     int coh = spu_coh_is_reserved((uint32_t)ea);
++    if (coh) spu_lockline_lock_ea((uint32_t)ea);
++    if (self && self->reserve_addr != (uint32_t)ea) {             /* reservation lost */
++        if (coh) spu_lockline_unlock_ea((uint32_t)ea);
++        resv_unlock(L); return 0;
++    }
+     /* SPU_PUTLLC_WHY=1: count PPU commits that land on a line an SPU has
+      * reserved. If an SPU's PUTLLC never succeeds for "no reservation", the
+      * PPU hammering the same 128-byte line is one of only two agents that can
+@@ -950,15 +1486,17 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
              if ((++n % 100000) == 1)
                  fprintf(stderr, "[ppu-steals-resv] %llu: PPU CAS on reserved line 0x%08X\n",
                          n, (uint32_t)ea & ~127u); } }
 -    if (coh) spu_lockline_lock();
-+    if (coh) spu_lockline_lock_ea((uint32_t)ea);
      int ok = __atomic_compare_exchange_n((uint32_t*)(vm_base + ea), &exp_raw, new_raw,
                                           0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
      if (coh) {
@@ -9864,12 +10052,24 @@ index 1baea72..c248c9f 100644
      }
      if (ok) ppu_resv_break(ea);
      resv_unlock(L);
-@@ -1021,11 +1393,11 @@ extern "C" int ppu_stdcx64(uint64_t ea, uint64_t expected, uint64_t val)
++    { const uint32_t wl = hang_watch_line();
++      if (wl && ((uint32_t)ea & ~127u) == wl)
++          hang_trace('C', self ? (uint32_t)self->thread_id : 0u, expected, val, (uint32_t)ok); }
+     /* PPU_CASWATCH=<hex ea>: log successful stwcx. on that 128-byte line.
+      * PPU_WWATCH hooks plain stores only; an atomic counter (a semaphore an SPU
+      * spins on) is written exclusively through here and looked untouched. */
+@@ -1019,13 +1557,16 @@ extern "C" int ppu_stdcx64(uint64_t ea, uint64_t expected, uint64_t val)
+     if (resv_diag() && self) resv_check_reg(self);
+     volatile LONG* L = resv_slot(ea);   /* ea and ea+4 share a 16-byte-block slot */
      resv_lock(L);
-     if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }
+-    if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }
      int coh = spu_coh_is_reserved((uint32_t)ea);
 -    if (coh) spu_lockline_lock();
-+    if (coh) spu_lockline_lock_ea((uint32_t)ea);
++    if (coh) spu_lockline_lock_ea((uint32_t)ea);                   /* see ppu_stwcx32 */
++    if (self && self->reserve_addr != (uint32_t)ea) {
++        if (coh) spu_lockline_unlock_ea((uint32_t)ea);
++        resv_unlock(L); return 0;
++    }
      int ok = __atomic_compare_exchange_n((uint64_t*)(vm_base + ea), &exp_raw, new_raw, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
      if (coh) {
          if (ok) spu_coh_notify_write((uint32_t)ea);
@@ -9878,7 +10078,7 @@ index 1baea72..c248c9f 100644
      }
      if (ok) { ppu_resv_break(ea); ppu_resv_break(ea + 4); }  /* 8-byte store spans two words */
      resv_unlock(L);
-@@ -1453,10 +1825,10 @@ extern "C" int* ps3_ppu_vcall_sp_slot(void) { return &g_vcall_sp; }
+@@ -1453,10 +1994,10 @@ extern "C" int* ps3_ppu_vcall_sp_slot(void) { return &g_vcall_sp; }
  #define VM_WRITE_COH(a, src, n)                                               \
      do {                                                                      \
          if (spu_coh_is_reserved((uint32_t)(a))) {                             \
@@ -9891,7 +10091,7 @@ index 1baea72..c248c9f 100644
          } else {                                                              \
              memcpy(vm_base + (uint32_t)(a), (src), (n));                      \
          }                                                                     \
-@@ -1546,6 +1918,7 @@ static inline void ppu_null_read_report(uint32_t a, int width, void* ra)
+@@ -1546,6 +2087,7 @@ static inline void ppu_null_read_report(uint32_t a, int width, void* ra)
  /* ppu_recomp.h's inline loads (vm_read*_inl) skip the out-of-line accessors'
   * probes, so they run only while no read diagnostic is armed. */
  extern "C" int vm_inline_ok = 0;
@@ -9899,7 +10099,7 @@ index 1baea72..c248c9f 100644
  static struct VmInlineInit {
      VmInlineInit() {
          static const char* const vars[] = {
-@@ -1554,6 +1927,13 @@ static struct VmInlineInit {
+@@ -1554,6 +2096,13 @@ static struct VmInlineInit {
          int d = 0;
          for (int i = 0; vars[i]; i++) if (getenv(vars[i])) d = 1;
          vm_inline_ok = !d;
@@ -9913,7 +10113,7 @@ index 1baea72..c248c9f 100644
      }
  } s_vm_inline_init;
  
-@@ -1771,7 +2151,21 @@ static void ww_arm_inline_window(uint32_t ww)
+@@ -1771,7 +2320,21 @@ static void ww_arm_inline_window(uint32_t ww)
      g_ww_lo = ww & ~15u;
      g_ww_hi = (ww & ~15u) + len;
  }
@@ -9936,7 +10136,7 @@ index 1baea72..c248c9f 100644
  {
      /* PPU_WVAL=<hexvalue>: log every PPU store that WRITES this value, wherever
       * it lands. PPU_WWATCH answers "who writes this address"; when a bad value is
-@@ -1892,6 +2286,12 @@ static inline void barrier_watch_hit(uint32_t a, uint32_t v, int width, void* ra
+@@ -1892,6 +2455,12 @@ static inline void barrier_watch_hit(uint32_t a, uint32_t v, int width, void* ra
      }
  }
  
@@ -9949,7 +10149,7 @@ index 1baea72..c248c9f 100644
  /* See the note on the forward declaration above ppu_stwcx32. */
  extern "C" void ppu_ww_note_atomic(uint32_t ea, uint32_t val, int width, void* ra)
  {
-@@ -3035,7 +3435,62 @@ extern "C" void ppu_prof_stamp(void* ctx, unsigned lr);
+@@ -3035,7 +3604,62 @@ extern "C" void ppu_prof_stamp(void* ctx, unsigned lr);
  #define PS3_SC_INFLIGHT_MAX 64
  extern "C" uint32_t g_sc_inflight[PS3_SC_INFLIGHT_MAX] = { 0 };
  
@@ -10012,7 +10212,7 @@ index 1baea72..c248c9f 100644
  {
      /* One-shot: PPU_GUARD_EA=<hex> arms the page guard on that address without
       * waiting for a store watch to fire. Armed here because lv2_syscall runs
-@@ -3093,10 +3548,13 @@ extern "C" void lv2_syscall(ppu_context* ctx)
+@@ -3093,10 +3717,13 @@ extern "C" void lv2_syscall(ppu_context* ctx)
      switch (num) {
      case 352: {   /* sys_memory_get_user_memory_size(sys_memory_info_t* info)
                     * info = { u32 total_user_memory; u32 available_user_memory } */
@@ -10030,7 +10230,7 @@ index 1baea72..c248c9f 100644
          return;
      }
      case 330: {   /* sys_mmapper_allocate_address(u64 size, u64 flags,
-@@ -3646,6 +4104,17 @@ extern "C" void ppu_register_opd_fixup(uint32_t opd, uint32_t code, uint32_t toc
+@@ -3646,6 +4273,17 @@ extern "C" void ppu_register_opd_fixup(uint32_t opd, uint32_t code, uint32_t toc
          s_opd_fixups[s_opd_fixup_n].code = code; s_opd_fixups[s_opd_fixup_n].toc = toc; s_opd_fixup_n++; }
  }
  
@@ -10048,7 +10248,7 @@ index 1baea72..c248c9f 100644
  extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
                                     uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                                     uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7)
-@@ -3673,7 +4142,7 @@ extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
+@@ -3673,7 +4311,7 @@ extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
      /* Private scratch stack high in the guest stack region, distinct from the
       * main + ppu_thread stacks. One callback at a time per caller thread. */
      static PPU_THREAD_LOCAL uint32_t s_cb_sp = 0;
@@ -10057,7 +10257,7 @@ index 1baea72..c248c9f 100644
  
      ppu_context ctx;
      memset(&ctx, 0, sizeof(ctx));
-@@ -3718,7 +4187,7 @@ extern "C" uint64_t ppu_guest_call_ct(uint32_t code, uint32_t toc,
+@@ -3718,7 +4356,7 @@ extern "C" uint64_t ppu_guest_call_ct(uint32_t code, uint32_t toc,
      if (!fn) { fprintf(stderr, "[ppu] guest_call_ct: code 0x%08X not registered\n", code); return 0; }
  
      static PPU_THREAD_LOCAL uint32_t s_cb_sp = 0;
@@ -10155,7 +10355,7 @@ index 35052c6..9764dd4 100644
  VMX_INL void name(VMX_D, VMX_B, uint32_t vscr) { const uint8_t* b = (const uint8_t*)b_; uint8_t r[16]; \
      for (int i = 0; i < 4; i++) { uint32_t y = vmx_w(b, i); if (flush_in) y = vmx_flush(y, vscr); \
 diff --git a/runtime/spu/spu_channels.c b/runtime/spu/spu_channels.c
-index 506da3f..50c4cd3 100644
+index 506da3f..aa98cd8 100644
 --- a/runtime/spu/spu_channels.c
 +++ b/runtime/spu/spu_channels.c
 @@ -1,70 +1,132 @@
@@ -10355,7 +10555,7 @@ index 506da3f..50c4cd3 100644
  /* Called after an SPU atomic commits a 128-byte line, with the lock-line lock
   * released. cellSpurs sets it so a PPU blocked in cellSpursEventFlagWait wakes
   * when a task sets the flag, instead of on its next 2 ms poll. */
-@@ -107,2688 +169,3034 @@ void spu_ls_watch_slow(uint32_t lsa, int is_write, const uint8_t* p, uint32_t pc
+@@ -107,2688 +169,3049 @@ void spu_ls_watch_slow(uint32_t lsa, int is_write, const uint8_t* p, uint32_t pc
      }
  }
  
@@ -11658,6 +11858,11 @@ index 506da3f..50c4cd3 100644
 +          } }
 +        }
 +        spu_lockline_unlock_ea(ea);
++        { extern uint32_t hang_watch_line(void); extern void hang_trace(char, uint32_t, uint32_t, uint32_t, uint32_t);
++          const uint32_t wl = hang_watch_line();
++          if (wl && (ea & ~127u) == wl)
++              hang_trace('G', ctx->spu_id, __builtin_bswap32(*(const uint32_t*)ctx->resv_line),
++                         __builtin_bswap32(*(const uint32_t*)(ctx->resv_line + 4)), 0); }
 +        if (__builtin_expect(mfc_diag(), 0)) {
 +        /* SPU_LLARWATCH=<hex EA>: every GETLLAR of that line, with the LSA it
 +         * used and the first word as it lands in BOTH places.
@@ -11815,6 +12020,11 @@ index 506da3f..50c4cd3 100644
 +                      ctx->atomic_stat ? "FAIL" : "OK",
 +                      ctx->gpr[0]._u32[0] & SPU_LS_MASK, ea); }
 +        ctx->resv_valid = 0;                           /* reservation consumed */
++        { extern uint32_t hang_watch_line(void); extern void hang_trace(char, uint32_t, uint32_t, uint32_t, uint32_t);
++          const uint32_t wl = hang_watch_line();
++          if (wl && (ea & ~127u) == wl)
++              hang_trace('P', ctx->spu_id, __builtin_bswap32(*(const uint32_t*)mem),
++                         __builtin_bswap32(*(const uint32_t*)(mem + 4)), ctx->atomic_stat); }
 +        spu_lockline_unlock_ea(ea);
          if (ctx->atomic_stat == 0) {
              spu_taskset_line_committed(ea & ~127u);
@@ -11856,6 +12066,11 @@ index 506da3f..50c4cd3 100644
 +         * has already overwritten. */
 +        spu_coh_notify_write(ea);
 +        ctx->resv_valid = 0; ctx->atomic_stat = 2;   /* PUTLLUC complete */
++        { extern uint32_t hang_watch_line(void); extern void hang_trace(char, uint32_t, uint32_t, uint32_t, uint32_t);
++          const uint32_t wl = hang_watch_line();
++          if (wl && (ea & ~127u) == wl)
++              hang_trace('U', ctx->spu_id, __builtin_bswap32(*(const uint32_t*)mem),
++                         __builtin_bswap32(*(const uint32_t*)(mem + 4)), 0); }
 +        spu_lockline_unlock_ea(ea);
 +        spu_taskset_line_committed(ea & ~127u);
          if (g_spu_line_commit_hook) g_spu_line_commit_hook(ea & ~127u);
@@ -16068,7 +16283,7 @@ index 506da3f..50c4cd3 100644
 +}
 +#endif
 diff --git a/runtime/spu/spu_coherency.c b/runtime/spu/spu_coherency.c
-index 923d8bd..e202b50 100644
+index 923d8bd..479c2e5 100644
 --- a/runtime/spu/spu_coherency.c
 +++ b/runtime/spu/spu_coherency.c
 @@ -38,22 +38,125 @@ static volatile long g_lockline = 0;
@@ -16286,7 +16501,16 @@ index 923d8bd..e202b50 100644
      for (spu_coh_entry** link = &s_coh_ctxs; *link;) {
          spu_coh_entry* entry = *link;
          uintptr_t c = (uintptr_t)entry->ctx;
-@@ -191,7 +319,7 @@ void spu_coh_notify_write_except(uint32_t ea, const void* self)
+@@ -184,14 +312,16 @@ int spu_coh_is_reserved(uint32_t addr)
+  *
+  * The PUTLLC path already guards this case by dropping its own reservation
+  * before notifying; this gives the DMA path the same ability. */
++void ppu_resv_break_line(uint32_t line);   /* ppu_loader.cpp */
+ void spu_coh_notify_write_except(uint32_t ea, const void* self)
+ {
+     uint32_t line = ea & ~127u;
++    ppu_resv_break_line(line);   /* the PPU's reservation granule is the line too */
+     for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
          spu_context* c = entry->ctx;
          if (!c || (const void*)c == self) continue;
          if (c->resv_valid && (c->resv_ea & ~127u) == line) {
@@ -16295,7 +16519,12 @@ index 923d8bd..e202b50 100644
              c->resv_valid = 0;
              g_spu_lr_raise++;
              spu_ch_wake(c);
-@@ -206,7 +334,7 @@ void spu_coh_notify_write(uint32_t ea)
+@@ -202,11 +332,12 @@ void spu_coh_notify_write_except(uint32_t ea, const void* self)
+ void spu_coh_notify_write(uint32_t ea)
+ {
+     uint32_t line = ea & ~127u;
++    ppu_resv_break_line(line);   /* the PPU's reservation granule is the line too */
+     for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
          spu_context* c = entry->ctx;
          if (!c) continue;
          if (c->resv_valid && (c->resv_ea & ~127u) == line) {
@@ -18508,10 +18737,21 @@ index 45235ea..4844931 100644
  void sys_cond_init(lv2_syscall_table* tbl)
  {
 diff --git a/runtime/syscalls/sys_event.c b/runtime/syscalls/sys_event.c
-index 4240edf..9e7bd96 100644
+index 4240edf..ad9d341 100644
 --- a/runtime/syscalls/sys_event.c
 +++ b/runtime/syscalls/sys_event.c
-@@ -283,10 +283,11 @@ void sys_event_queue_cancel_by_id(uint32_t queue_id)
+@@ -9,6 +9,10 @@
+ #include "../spu/spu_workload.h"   /* spu_elf_image_size, spu_workload_dispatch_async */
+ #include <string.h>
+ #include <stdlib.h>               /* getenv */
++/* HANG_WATCH_LINE / HANG_WATCH_Q ring (defined below, used throughout) */
++uint32_t hang_watch_line(void);
++uint32_t hang_watch_queue(void);
++void hang_trace(char k, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+ 
+ /* Recorded by sys_spu_thread_initialize (lv2_register.c): the SPURS kernel
+  * context EA the title's SPU task runtime is dispatched against. */
+@@ -283,10 +287,12 @@ void sys_event_queue_cancel_by_id(uint32_t queue_id)
              queue_id);
  }
  
@@ -18523,11 +18763,12 @@ index 4240edf..9e7bd96 100644
 +static int s_ps3_waitbt = -1, s_ydkj_sputask = -1, s_ydkj_spurs_ready = -1, s_ydkj_fakecomplete = -1, s_ydkj_hle_draw = -1;
 +
 +static int64_t sys_event_queue_receive_impl(ppu_context* ctx);
++static int64_t sys_event_queue_receive_traced(ppu_context* ctx);
 +static int64_t sys_event_queue_receive_impl(ppu_context* ctx)
  {
      uint32_t queue_id    = LV2_ARG_U32(ctx, 0);
      uint32_t event_addr  = LV2_ARG_PTR(ctx, 1);
-@@ -301,7 +302,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -301,7 +307,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
  
      /* PS3_WAITBT: one-shot guest-stack dump per (tid,queue) so we can name the
       * exact game function the main thread is stuck polling in the flip loop. */
@@ -18536,7 +18777,7 @@ index 4240edf..9e7bd96 100644
          static unsigned char seen[8][8] = {{0}};
          unsigned t = (unsigned)ctx->thread_id & 7, qk = queue_id & 7;
          if (!seen[t][qk]) {
-@@ -365,7 +366,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -365,7 +371,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * 0x004F5F80) against the recorded SPURS context. It claims the ready task
       * from libsre's taskset and runs the task body -- real recompiled SPU code,
       * not a synthesized completion. Gated by YDKJ_SPUTASK; fire once. */
@@ -18545,7 +18786,7 @@ index 4240edf..9e7bd96 100644
          static int s_fired = 0;
          if (!s_fired) {
              s_fired = 1;
-@@ -386,7 +387,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -386,7 +392,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * returns. Synthesize a ready event so init returns -> see whether the PPU
       * then reaches CreateTaskset and the running policy dispatches the cri task.
       * Returns a zero-ish SPU-thread-group event; refine the format if init rejects it. */
@@ -18554,7 +18795,7 @@ index 4240edf..9e7bd96 100644
              && timeout_us == 0 && q->count == 0) {
          static int s_fire[8] = {0};
          if (s_fire[queue_id] < 64) {
-@@ -412,7 +413,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -412,7 +418,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * main thread times out after 30s and the title tears down. Synthesize a
       * completion so the wait returns -> see whether the game then advances to
       * asset load + menu draw (content). Returns immediately with a zero event. */
@@ -18563,7 +18804,7 @@ index 4240edf..9e7bd96 100644
          if (event_addr != 0) {
              uint64_t* out = (uint64_t*)vm_to_host(event_addr);
              out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
-@@ -422,7 +423,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -422,7 +428,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
      /* YDKJ_HLE_DRAW (diagnostic): also unblock the AsyncLoad q=1 wait (timeout=0,
       * blocks forever) so the loader thread proceeds. Tests whether the game's
       * render/draw code is reachable once the completion waits are satisfied. */
@@ -18572,7 +18813,7 @@ index 4240edf..9e7bd96 100644
          static int s_n1 = 0;
          if (s_n1 < 256) { s_n1++;
              if (event_addr != 0) {
-@@ -718,6 +719,20 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
+@@ -718,12 +724,30 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
                                (unsigned)g_sys_event_queues[k - 1].count);
                fprintf(stderr, "\n"); fflush(stderr);
            } } }
@@ -18593,7 +18834,17 @@ index 4240edf..9e7bd96 100644
  #ifdef _WIN32
      EnterCriticalSection(&q->lock);
  #else
-@@ -748,6 +763,43 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
+     pthread_mutex_lock(&q->lock);
+ #endif
+ 
++    { const uint32_t wq = hang_watch_queue();
++      if (wq && (unsigned)(q - g_sys_event_queues) + 1u == wq)
++          hang_trace(q->count >= q->capacity ? 'F' : 'E', q->count >= q->capacity ? q->capacity : q->count,
++                     (uint32_t)evt->data1, (uint32_t)evt->data2, (uint32_t)evt->data3); }
+     if (q->count >= q->capacity) {
+ #ifdef _WIN32
+         LeaveCriticalSection(&q->lock);
+@@ -748,6 +772,43 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
      return 0;
  }
  
@@ -18637,7 +18888,7 @@ index 4240edf..9e7bd96 100644
  /* EXPERIMENT: inject an event into a queue by id, to probe whether unblocking
   * the SPURS completion queue (q=1) lets the PPU reach its render loop. */
  int sys_event_queue_inject(uint32_t qid, uint64_t source,
-@@ -1518,3 +1570,31 @@ void sys_event_init(lv2_syscall_table* tbl)
+@@ -1518,3 +1579,142 @@ void sys_event_init(lv2_syscall_table* tbl)
      lv2_syscall_register(tbl, SYS_EVENT_FLAG_CLEAR,    sys_event_flag_clear);
      lv2_syscall_register(tbl, SYS_EVENT_FLAG_GET,      sys_event_flag_get);
  }
@@ -18646,7 +18897,118 @@ index 4240edf..9e7bd96 100644
 + * sys_event_queue_receive of that thread -- queue, timeout, how long it
 + * waited, the event's data words, and the time -- to lay out what paces a
 + * loop (Demon's Souls' audio mixer). */
++/* HANG_WATCH_LINE=<hex ea> / HANG_WATCH_Q=<queue id>: a ring of protocol
++ * events on one 128-byte line (SPU GETLLAR/PUTLLC/PUTLLUC, PPU stwcx) and one
++ * event queue (push, push refused because full, receive enter/leave), printed
++ * by the hang dump below. Writing each to stderr instead slowed the game to
++ * ~5 fps and the race no longer happened. */
++typedef struct { unsigned long long t; uint32_t a, b, c, d; char k; } hang_ev;
++static hang_ev s_hev[4096];
++static volatile long s_hev_n;
++static int s_hw_init;
++static uint32_t s_hw_line, s_hw_q;
++static void hang_watch_init(void)
++{
++    const char* e = getenv("HANG_WATCH_LINE");
++    s_hw_line = e ? (uint32_t)strtoul(e, NULL, 16) & ~127u : 0;
++    e = getenv("HANG_WATCH_Q");
++    s_hw_q = e ? (uint32_t)atoi(e) : 0;
++    s_hw_init = 1;
++}
++uint32_t hang_watch_line(void) { if (!s_hw_init) hang_watch_init(); return s_hw_line; }
++uint32_t hang_watch_queue(void) { if (!s_hw_init) hang_watch_init(); return s_hw_q; }
++void hang_trace(char k, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
++{
++    extern unsigned long long ps3_qpc_us(void);
++    const long i = _InterlockedIncrement(&s_hev_n) - 1;
++    hang_ev* e = &s_hev[i & 4095];
++    e->t = ps3_qpc_us(); e->a = a; e->b = b; e->c = c; e->d = d; e->k = k;
++}
++static void hang_trace_dump(void)
++{
++    const long n = s_hev_n;
++    if (!n) return;
++    const long first = n > 160 ? n - 160 : 0;
++    fprintf(stderr, "[hang] protocol ring (line %08X queue %u): last %ld of %ld events\n",
++            s_hw_line, s_hw_q, n - first, n);
++    const unsigned long long t_end = s_hev[(n - 1) & 4095].t;
++    for (long i = first; i < n; i++) {
++        const hang_ev* e = &s_hev[i & 4095];
++        const char* what =
++            e->k == 'G' ? "SPU GETLLAR   spu=%X  w0=%08X w1=%08X" :
++            e->k == 'P' ? "SPU PUTLLC %s spu=%X  w0=%08X w1=%08X" :
++            e->k == 'U' ? "SPU PUTLLUC   spu=%X  w0=%08X w1=%08X" :
++            e->k == 'C' ? "PPU stwcx  %s tid=%u expected=%08X new=%08X" :
++            e->k == 'E' ? "evq push   pending_before=%u d1=%08X d2=%08X d3=%08X" :
++            e->k == 'F' ? "evq push REFUSED (full) cap=%u d1=%08X d2=%08X d3=%08X" :
++            e->k == 'R' ? "receive enter tid=%u" :
++            e->k == 'r' ? "receive leave tid=%u rc=%d d1=%08X d2=%08X" : "?";
++        char line[256];
++        if (e->k == 'P') snprintf(line, sizeof line, what, e->d ? "FAIL" : "ok  ", e->a, e->b, e->c);
++        else if (e->k == 'C') snprintf(line, sizeof line, what, e->d ? "ok  " : "FAIL", e->a, e->b, e->c);
++        else snprintf(line, sizeof line, what, e->a, e->b, e->c, e->d);
++        fprintf(stderr, "[hang]  %+10.3f ms  %s\n", -(double)(t_end - e->t) / 1000.0, line);
++    }
++}
++
++/* Who waits on which queue, for PS3_HANG_DUMP (ppu_loader.cpp): a slot per
++ * guest thread, filled for the duration of every receive. When the game
++ * freezes in one, the dump shows the queue, the waiter's registers and the
++ * guest memory those registers point at -- e.g. the CellSpursQueue a
++ * cellSpursQueuePopBody is blocked on, which tells an empty queue from a
++ * wake-up that was lost. */
++typedef struct { ppu_context* ctx; uint32_t q; unsigned long long since_us; } evq_waiter;
++static evq_waiter s_evq_wait[256];
++void evq_hang_report(void)
++{
++    extern unsigned long long ps3_qpc_us(void);
++    extern uint8_t* vm_base;
++    const unsigned long long now = ps3_qpc_us();
++    for (int i = 0; i < 256; i++) {
++        ppu_context* c = s_evq_wait[i].ctx;
++        if (!c) continue;
++        const uint32_t wq = s_evq_wait[i].q;
++        const sys_event_queue_info* qi = wq && wq <= SYS_EVENT_QUEUE_MAX ? &g_sys_event_queues[wq - 1] : NULL;
++        fprintf(stderr, "[hang] evq waiter guest_tid=%llu queue=%u (pending %u of %u) for %.1f s lr=0x%08X\n",
++                (unsigned long long)c->thread_id, wq, qi ? (unsigned)qi->count : 0u, qi ? (unsigned)qi->capacity : 0u,
++                (double)(now - s_evq_wait[i].since_us) / 1e6, (uint32_t)c->lr);
++        char line[512]; int n = 0;
++        for (int r = 3; r < 32; r++) {
++            n += snprintf(line + n, sizeof line - n, " r%d=%08X", r, (uint32_t)c->gpr[r]);
++            if (r == 17 || r == 31) { fprintf(stderr, "[hang]  %s\n", line); n = 0; }
++        }
++        for (int r = 3; r < 32; r++) {
++            const uint32_t p = (uint32_t)c->gpr[r];
++            if (p < 0x10000u || p >= 0x50000000u || (p & 3u)) continue;
++            int dup = 0;
++            for (int k = 3; k < r; k++) if ((uint32_t)c->gpr[k] == p) dup = 1;
++            if (dup) continue;
++            n = snprintf(line, sizeof line, "[hang]  mem r%d @%08X:", r, p);
++            for (int w = 0; w < 16; w++) {
++                const uint8_t* m = vm_base + p + w * 4;
++                n += snprintf(line + n, sizeof line - n, " %02X%02X%02X%02X", m[0], m[1], m[2], m[3]);
++            }
++            fprintf(stderr, "%s\n", line);
++        }
++    }
++    hang_trace_dump();
++    fflush(stderr);
++}
++
 +int64_t sys_event_queue_receive(ppu_context* ctx)
++{
++    extern unsigned long long ps3_qpc_us(void);
++    evq_waiter* slot = &s_evq_wait[ctx->thread_id & 255];
++    slot->q = LV2_ARG_U32(ctx, 0); slot->since_us = 0; slot->since_us = ps3_qpc_us(); slot->ctx = ctx;
++    const int traced = slot->q && slot->q == hang_watch_queue();
++    if (traced) hang_trace('R', (uint32_t)ctx->thread_id, 0, 0, 0);
++    const int64_t rc = sys_event_queue_receive_traced(ctx);
++    if (traced) hang_trace('r', (uint32_t)ctx->thread_id, (uint32_t)rc, (uint32_t)ctx->gpr[5], (uint32_t)ctx->gpr[6]);
++    slot->ctx = NULL;
++    return rc;
++}
++
++static int64_t sys_event_queue_receive_traced(ppu_context* ctx)
 +{
 +    static long tid = -2; static double from_s; static long left;
 +    if (tid == -2) { const char* e = getenv("RECV_TRACE_TID"); tid = e ? atol(e) : -1;

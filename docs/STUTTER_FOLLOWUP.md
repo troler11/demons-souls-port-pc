@@ -1,6 +1,7 @@
 # Travadas: apresentação, SPU e cache (26/10/2026, etapa 21)
 
 Atualização posterior: [eventos SPU e detector de progresso, etapa 22](SPU_EVENT_FOLLOWUP.md).
+Causa do congelamento do Nexus encontrada e corrigida: [NEXUS_FREEZE_FIX.md](NEXUS_FREEZE_FIX.md).
 
 Instalados **74 shaders individuais validados**, preservando os 1.441 arquivos
 anteriores. O diagnóstico agora reprova frames parados apesar de amostras
