@@ -172,11 +172,38 @@ elseif(PORT_ENABLE_SPU)
     endif()
 endif()
 
+option(PORT_SPU_REGCACHE "Build register-cached SPU twins (SPU_REGCACHE=0 selects originals)" ON)
+if(PORT_SPU_REGCACHE AND SPU_SOURCES)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(PORT_SPU_INPUTS)
+        set(SPU_RC_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_spu")
+    else()
+        set(SPU_RC_DIR "${SPU_DIR}")
+    endif()
+    set(SPU_RC_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/spu_regcache.py")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SPU_RC_TOOL}")
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${SPU_RC_TOOL}" "${SPU_RC_DIR}"
+        RESULT_VARIABLE SPU_RC_RESULT OUTPUT_VARIABLE SPU_RC_OUTPUT ERROR_VARIABLE SPU_RC_ERROR)
+    if(NOT SPU_RC_RESULT EQUAL 0)
+        message(FATAL_ERROR "SPU register cache generation failed:\n${SPU_RC_ERROR}")
+    endif()
+    set(SPU_RC_SOURCES "")
+    foreach(SPU_SOURCE IN LISTS SPU_SOURCES)
+        if(SPU_SOURCE MATCHES "[/\\]spu_recomp\\.c$")
+            get_filename_component(SPU_SOURCE_DIR "${SPU_SOURCE}" DIRECTORY)
+            list(APPEND SPU_RC_SOURCES "${SPU_SOURCE_DIR}/spu_recomp_rc.c")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SPU_SOURCE}")
+        endif()
+    endforeach()
+    list(APPEND SPU_SOURCES ${SPU_RC_SOURCES})
+    message(STATUS "SPU register cache: ${SPU_RC_DIR} (originals retained)")
+endif()
+
 add_executable(${PROJECT_NAME}
     main.cpp
     stubs.cpp
     des_options.cpp
-    des_menu_sfx.cpp
+    no_ui.cpp
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
@@ -252,12 +279,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/ui/include"
 )
 
-# --- The wrapper UI (port/ui) ---
-add_subdirectory(ui)
-
+# The old start screen and in-game menu are intentionally not built/linked.
+# no_ui.cpp preserves the generated hooks until the replacement frontend lands.
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
-    des_ui
 )
 
 # The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
@@ -320,15 +345,24 @@ endif()
 #     default; a PPC fmadd is spelt as one where the lifter means one.
 #   - /bigobj on MSVC. A single lifted file routinely passes the 65,536-section
 #     limit of the default object format.
+#   - AVX2/FMA, like the runtime and SPU code beside it (so no new CPU floor):
+#     without it ppu_vmx.h's vector float ops fall back to the element loops
+#     and every fmaf is a libm call. Contraction stays off with FMA available.
 if(MSVC)
     set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "/w;/bigobj")
+        COMPILE_OPTIONS "/w;/bigobj;/GS-;-mavx2;-mfma;-mbmi2;/clang:-ffp-contract=off")
 else()
     set_source_files_properties(${RECOMP_SOURCES} PROPERTIES
         COMPILE_OPTIONS "-w;-ffp-contract=off")
 endif()
 
 # ---------------------------------------------------------------------------
+# Launcher: the options window that starts the game (Jogar.bat opens it)
+# ---------------------------------------------------------------------------
+add_executable(DesLauncher WIN32 launcher/launcher.c)
+target_link_libraries(DesLauncher PRIVATE gdiplus shell32 ole32 user32 gdi32 comctl32 uxtheme)
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+install(TARGETS ${PROJECT_NAME} DesLauncher RUNTIME DESTINATION bin)

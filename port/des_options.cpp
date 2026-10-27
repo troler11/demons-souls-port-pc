@@ -72,8 +72,9 @@
  *   good when the level's script archive (script/m*.luabnd) opens.
  */
 #include "ppu_recomp.h"
+#include "frame_timing.h"
 #include "ps3emu/ps3_knob.h"   /* ps3_setenv: through the runtime's getenv cache */
-#include "ui/include/des_ui.h"  /* the wrapper UI: settings.ini and the overlay (docs/32) */
+#include "ui/include/des_ui.h"  /* compatibility entry; current build has no wrapper UI */
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -82,6 +83,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <atomic>
 
 extern "C" void ppu_register_function(uint64_t addr, void (*fn)(ppu_context*));
 extern "C" const char* ppu_vfs_root;
@@ -89,6 +91,7 @@ extern "C" void (*g_gcm_flip_request_hook)(void);
 extern "C" unsigned (*g_pad_title_hook)(void);
 extern "C" void (*g_fs_open_hook)(const char* guest_path);
 extern "C" void ps3_vblank_set_mhz(int mhz);   /* boot_main.cpp; 0 = VBLANK_MHZ */
+extern "C" void rsx_live_draw_set_present_timing(int period_us, int vsync);
 extern "C" volatile unsigned g_pad0_reads, g_pad0_empty_reads, g_pad0_buttons, g_pad0_lstick;   /* cellPad.c */
 extern "C" __declspec(dllimport) short __stdcall GetAsyncKeyState(int vkey);   /* user32 */
 constexpr int VK_F8 = 0x77;
@@ -195,10 +198,13 @@ constexpr uint32_t kRemoSlots[]  = {0x28u, 0x40u, 0x58u, 0x70u};
 /* DES_FPS as applied: -1 before the engine object exists, 0 the game's own
  * mode, else the frame rate. Render thread only (the flip request hook). */
 int s_fps = -1;
+std::atomic<int> s_target_fps{0};
+std::atomic<int> s_original_noskip{-1};
 bool s_vblank_pinned = false;   /* VBLANK_MHZ set at start: it wins over the cap */
 
 int fps_parse(const char* f)
 {
+    if (f && strcmp(f, "uncapped") == 0) return 1000;
     const int fps = f ? atoi(f) : 0;
     if (fps == 60 || fps == 30 || (fps > 60 && fps <= 240)) return fps;
     if (f && *f && strcmp(f, "0") != 0)
@@ -210,7 +216,8 @@ int fps_parse(const char* f)
 int fps_wanted()
 {
     static int fps = 0;
-    PS3_KNOB(fps, fps_parse(getenv("DES_FPS")));
+    PS3_KNOB(fps, getenv("DES_FPS") ? fps_parse(getenv("DES_FPS")) :
+        (env_on("DES_FPS_UNLOCK") ? 60 : 0));
     return fps;
 }
 
@@ -218,7 +225,7 @@ int fps_wanted()
  * clock back to VBLANK_MHZ, which a user setting it at start keeps). */
 int fps_vblank_mhz(int fps)
 {
-    return fps > 60 && !s_vblank_pinned ? fps * 1000 : 0;
+    return fps > 60 && !s_vblank_pinned ? (fps > 240 ? 240000 : fps * 1000) : 0;
 }
 
 bool cutscene_playing()
@@ -228,6 +235,13 @@ bool cutscene_playing()
     for (uint32_t off : kRemoSlots)
         if (vm_read32(man + off)) return true;
     return false;
+}
+
+void refresh_present_timing(int fps, bool cut)
+{
+    const char* v = getenv("DES_VSYNC");
+    if (!v) v = getenv("LD_VSYNC");
+    rsx_live_draw_set_present_timing(des_present_period_us(fps, cut), !v || atoi(v) != 0);
 }
 
 void fps_on_flip_request()
@@ -246,7 +260,8 @@ void fps_on_flip_request()
     if (want != s_fps) {
         if (s_fps < 0) {
             orig60 = vm_read8(obj + kFlipMode60);
-            orig_noskip = vm_read8(obj + kFlipNoSkip);
+            const int saved_noskip = s_original_noskip.load(std::memory_order_acquire);
+            orig_noskip = saved_noskip >= 0 ? (uint8_t)saved_noskip : vm_read8(obj + kFlipNoSkip);
             orig_dt = vm_read32(kFrameDt);
         }
         if (want) {
@@ -264,16 +279,18 @@ void fps_on_flip_request()
             fprintf(stderr, "[des] DES_FPS off: the game's own 30 fps mode\n");
         }
         s_fps = want;
+        s_target_fps.store(want, std::memory_order_relaxed);
         in_cutscene = false;
         last = clock::time_point();
     }
-    if (!s_fps) return;
+    if (!s_fps) { refresh_present_timing(0, false); return; }
     /* A cutscene plays as the game ships it: 30 mode on the PS3's vblank, so
      * it flips every other vblank, and a fixed 1/30 step. RemoMan steps its
      * positions at 30 Hz while animation follows the frame step, so any
      * faster and a cutscene judders. The vblank goes back to the unlocked
      * rate when the cutscene ends. */
     const bool cut = s_fps >= 60 && cutscene_playing();
+    refresh_present_timing(s_fps, cut);
     if (cut != in_cutscene) {
         in_cutscene = cut;
         vm_write8(obj + kFlipMode60, cut ? 0 : 1);
@@ -444,14 +461,14 @@ void on_flip_request()
 }
 
 constexpr unsigned kPadCross = 0x4000u, kPadStart = 0x0008u;
-volatile bool s_auto_done = false;
+std::atomic<bool> s_auto_done{false};
 
-extern "C" int des_ui_start_screen_up(void);   /* port/ui/src/des_ui.cpp */
+extern "C" int des_ui_start_screen_up(void);   /* no_ui.cpp: always false */
 
 unsigned auto_continue_buttons()
 {
-    /* From settings.ini the start screen still shows: press nothing until Play. */
-    if (s_auto_done || des_ui_start_screen_up()) return 0;
+    /* The compatibility hook is false in the build without wrapper menus. */
+    if (s_auto_done.load(std::memory_order_acquire) || des_ui_start_screen_up()) return 0;
     using clock = std::chrono::steady_clock;
     static const clock::time_point t0 = clock::now();
     const long long ms =
@@ -463,8 +480,8 @@ unsigned auto_continue_buttons()
 
 void auto_continue_on_open(const char* path)
 {
-    if (!s_auto_done && strstr(path, "/script/m") && strstr(path, ".luabnd")) {
-        s_auto_done = true;
+    if (!s_auto_done.load(std::memory_order_relaxed) && strstr(path, "/script/m") && strstr(path, ".luabnd")) {
+        s_auto_done.store(true, std::memory_order_release);
         fprintf(stderr, "[des] DES_AUTO_CONTINUE: level loading (%s), pad released\n", path);
     }
 }
@@ -521,6 +538,35 @@ void move_stuck_real_time(uint32_t mv, float f0, float dt)
 
 extern "C" PPU_THREAD_LOCAL void (*g_trampoline_fn)(void*);
 
+/* The two generated FPS hooks and the flip hook use the same live policy.
+ * The simulation clock is sampled on the game's main thread, not at Present. */
+extern "C" int des_title_fps_enabled(void) { return fps_wanted() != 0; }
+extern "C" int des_title_frame_rate(void) { return s_target_fps.load(std::memory_order_relaxed); }
+extern "C" uint8_t des_title_frameskip(uint8_t original, uint8_t unlocked)
+{
+    s_original_noskip.store(original, std::memory_order_release);
+    return fps_wanted() ? unlocked : original;
+}
+
+extern "C" double des_title_frame_dt(double original)
+{
+    using clock = std::chrono::steady_clock;
+    static clock::time_point previous;
+    static int previous_fps = -1;
+    const auto now = clock::now();
+    const int fps = fps_wanted();
+    double dt = kCutsceneDt;
+    if (fps && !(fps >= 60 && cutscene_playing()) && previous_fps == fps &&
+        previous != clock::time_point()) {
+        dt = std::chrono::duration<double>(now - previous).count();
+        if (dt > kMaxFrameDt) dt = kMaxFrameDt;
+    }
+    previous = now;
+    previous_fps = fps;
+    (void)original;
+    return (double)(float)dt;
+}
+
 /* Lifted in place of 0x00273D38 (--override-funcs), which is only
  * `0x002EC2B8(*(r3 + 0x20), f1 = step)`: the movement object's step after
  * physics. Called from the movement worker (0x002A8408) and 0x00296970. */
@@ -539,7 +585,7 @@ extern "C" void des_move_post(ppu_context* ctx)
         tf(ctx);
     }
     ctx->lr = lr;
-    if (s_fps > 0) move_stuck_real_time(mv, f0, dt);
+    if (s_target_fps.load(std::memory_order_relaxed) > 0) move_stuck_real_time(mv, f0, dt);
 }
 
 /* The cameras ease towards their targets by a fixed fraction a frame,
@@ -566,7 +612,7 @@ extern "C" void des_cam_rate(ppu_context* ctx, uint32_t addr)
             fputc('\n', stderr);
         }
     }
-    if (!on || s_fps <= 0) return;
+    if (!on || s_target_fps.load(std::memory_order_relaxed) <= 0) return;
     const uint32_t insn = vm_read32(addr);
     if ((insn >> 26) != 48) return;   /* lfs only */
     const int fd = (insn >> 21) & 31;
@@ -576,14 +622,14 @@ extern "C" void des_cam_rate(ppu_context* ctx, uint32_t addr)
     ctx->fpr[fd] = (float)(1.0 - std::pow(1.0 - k, (double)steps));
 }
 
-extern "C" void des_menu_sfx_init(void);   /* des_menu_sfx.cpp */
+extern "C" void des_menu_sfx_init(void);   /* no_ui.cpp */
 
 extern "C" void ps3_title_options_init(void)
 {
-    /* First: settings.ini fills in the options not set in the environment. */
+    /* Compatibility entry for the removed wrapper; settings come from the launcher. */
     des_ui_early_init();
     quarantine_truncated_cache();
-    des_menu_sfx_init();   /* the UI's sounds through the game's menu sounds */
+    des_menu_sfx_init();   /* no-op with the wrapper removed */
     if (env_on("DES_SKIP_INTRO")) {
         ppu_register_function(kLogoUpdate, logo_update_skip);
         fprintf(stderr, "[des] DES_SKIP_INTRO: boot logos shortened\n");
@@ -592,6 +638,8 @@ extern "C" void ps3_title_options_init(void)
      * live; the hook is always on. A VBLANK_MHZ given at start wins over the
      * cap. */
     s_vblank_pinned = getenv("VBLANK_MHZ") != nullptr;
+    s_target_fps.store(fps_wanted(), std::memory_order_relaxed);
+    refresh_present_timing(fps_wanted(), false);
     g_gcm_flip_request_hook = on_flip_request;
     if (const int fps = fps_wanted())
         fprintf(stderr, "[des] DES_FPS=%d: real frame time, no skip frames%s\n", fps,

@@ -156,7 +156,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
 
-        choice_row(leftPane, rightPane, "Frame rate", "DES_FPS", {"", "30", "60", "120", "144", "165", "240"},
+        choice_row(leftPane, rightPane, "Frame rate", "DES_FPS", {"0", "30", "60", "120", "144", "165", "240"},
             {"30 fps (original)", "30 fps, real frame time", "60 fps", "120 fps", "144 fps", "165 fps", "240 fps"},
             "The game's own frame rate mode. The original 30 fps mode draws a near-empty frame when one runs late. "
             "The others give the game the real time of each frame; 60 uses the game's 60 fps mode, and above that "

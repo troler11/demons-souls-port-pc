@@ -25,8 +25,8 @@ param([string]$Rpcs3 = "", [switch]$Fps30, [switch]$Uncapped, [string]$Resolutio
       [switch]$FrameGen)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\env.ps1"
-if ($Fps30) { $env:DES_FPS_UNLOCK = "0" }
-if ($Uncapped) { $env:LD_PRESENT_MIN_US = "0" }
+if ($Fps30) { $env:DES_FPS_UNLOCK = "0"; $env:DES_FPS = "0" }
+if ($Uncapped) { $env:DES_FPS = "uncapped" }
 if ($Resolution) {
     $env:DES_WINDOW = $Resolution
     if ($Scale -eq 0) {
@@ -38,7 +38,7 @@ if ($Resolution) {
         if ($Fsr) { $Scale = [math]::Max(1, [math]::Round($h / 720.0 / 1.5)) }
     }
 }
-if ($Scale -gt 1) { $env:LD_RES_SCALE = "$Scale" }
+if ($Scale -gt 0) { $env:LD_RES_SCALE = "$Scale" }
 if ($Fullscreen) { $env:DES_FULLSCREEN = "1" }
 if ($Fsr) { $env:LD_FSR = "1" }
 if ($Fxaa) { $env:LD_FXAA = "1" }

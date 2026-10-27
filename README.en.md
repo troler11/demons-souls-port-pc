@@ -19,6 +19,7 @@ This project translates the game's code, both the PS3's main processor (PPU) and
 October 2026, on Windows:
 
 - **Boot to tutorial**: notices, main menu, character creation, opening cinematic and the tutorial (corridor, courtyard, fighting the hollows, the tower). Saves work.
+- **Character name**: select the name field during creation and type on your PC keyboard. Enter confirms, Escape cancels; the game supplies the length limit.
 - **Its own Direct3D 12 renderer** (ps3recomp's "live draw" with this project's changes): shadows, fog, soft particles, eye adaptation, depth of field, and occlusion for the sun and lens flares.
 - **60 fps**: RPCS3's "Unlock FPS" patch (Gibbed and Whatcookie), applied as code. The tutorial corridor holds ~59 fps and the courtyard fight 46-59 fps. The stock 30 fps mode (`-Fps30`) stays locked at 30.
 - **Resolution**: a 720p to 4K window, with the scene rendered internally at up to 4x (2560x1440, 3840x2160...) on the GPU at about the same CPU cost (`-Resolution`, `-Scale`). **AMD FSR 1** (EASU + RCAS) to render smaller and upscale, and **FXAA** (`-Fsr`, `-Fxaa`, `-Sharpen`).
@@ -26,7 +27,7 @@ October 2026, on Windows:
 - **Video cinematics** (`.pam`), played through [ffmpeg](https://ffmpeg.org) with sound: the opening, the title screen and the story intro.
 - **Audio** complete and clean: music, voices and effects (MultiStream + ATRAC, using the codec from your firmware).
 - **The real SPURS kernel** (`libsre`, from your firmware) runs recompiled rather than approximated.
-- **Known issues**: the limit is the CPU (the recompiled PS3 code), not the GPU: on a Ryzen 5 5500, 57-60 fps in Boletaria; on a 6-thread CPU, ~45 (use `-FrameGen`); with 4 threads, 15-25. Some particles may be missing, and the sky sometimes blows out in outdoor areas.
+- **Known issues**: heavy scenes remain limited by CPU work and frame presentation. Results depend on the scene; see [PERFORMANCE.md](docs/PERFORMANCE.md). Frame generation can reduce base FPS and remains experimental. Some particles may be missing, and the sky sometimes blows out in outdoor areas.
 
 The full technical diary (in Portuguese), with every problem found and how it was solved: [docs/REPORT.md](docs/REPORT.md).
 
@@ -78,7 +79,7 @@ In PowerShell, from the repository folder:
 
 ## Playing
 
-The easy way: double-click **`Jogar.bat`**. A window lets you pick the resolution, internal resolution, frame rate, fullscreen, FSR, FXAA, frame generation, sharpening and the cinematics; the choices are remembered. The first time it asks for the RPCS3 folder.
+**`Jogar.bat`** starts the game directly. The port's start screen and in-game settings menu have been removed; F1, Esc and L3+R3 no longer open that interface. The original game menu still works. A replacement frontend can call `scripts/windows/play.ps1` with the arguments below and variables in [ENVIRONMENT.md](docs/ENVIRONMENT.md). The old UI's `settings.ini` is no longer loaded. Pass the RPCS3 path on the command line for the first run.
 
 From the command line:
 
@@ -92,10 +93,10 @@ From the command line:
 .\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # borderless fullscreen
 .\scripts\windows\play.ps1 -Resolution 4k -Fsr             # AMD FSR 1: render smaller and upscale (weaker GPUs)
 .\scripts\windows\play.ps1 -Fxaa                           # FXAA anti-aliasing
-.\scripts\windows\play.ps1 -FrameGen                       # frame generation: 60 -> 120 on screen
+.\scripts\windows\play.ps1 -FrameGen                       # experimental interpolation; may reduce base FPS
 ```
 
-**Frame generation** (`-FrameGen`): the game is CPU bound and the GPU mostly idle, so the GPU makes a frame between each two the game renders, estimating motion from the images themselves. Twice the frames on screen at no CPU cost, with half a frame of extra latency; it only matters on a display faster than 60 Hz. Driver alternatives: AMD Fluid Motion Frames (Adrenalin, RX 6000/7000+), NVIDIA Smooth Motion (RTX 40/50) or Lossless Scaling.
+**Frame generation** (`-FrameGen`): experimental interpolation based on image matching, without game depth or motion vectors. Presentation now uses a dedicated thread: in the tested heavy scene at 1080p, base FPS rose from 26.85 on the serial path to 34.37, versus 36.13 without generation. It still adds latency, may produce ghosting and does not guarantee twice as many visible frames. Keep it off to prioritize input response; measurements and limitations are in [PERFORMANCE.md](docs/PERFORMANCE.md).
 
 **F11** or **Alt+Enter** toggles between window and fullscreen in game.
 

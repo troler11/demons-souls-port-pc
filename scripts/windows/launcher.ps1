@@ -45,9 +45,9 @@ $cScale = Add-Combo "Resolução interna" @("Auto", "1x (720p)", "2x (1440p)", "
 $cFps   = Add-Combo "Taxa de quadros" @("60", "30 (original)", "Sem limite") $cfg.Fps
 $y += 4
 $kFull  = Add-Check "Tela cheia (F11 alterna)" $cfg.Fullscreen ""
-$kFsr   = Add-Check "AMD FSR 1 (renderiza menor e amplia)" $cfg.Fsr "Bom para placas de vídeo mais fracas."
+$kFsr   = Add-Check "AMD FSR 1 (renderiza menor e amplia)" $cfg.Fsr "Ajuda quando o limite é a GPU. Reduzir pixels não acelera os jobs de CPU do jogo."
 $kFxaa  = Add-Check "Anti-aliasing FXAA" $cfg.Fxaa ""
-$kGen   = Add-Check "Frame generation (dobra os quadros na tela)" $cfg.FrameGen "Precisa de monitor acima de 60 Hz. Meio quadro a mais de atraso."
+$kGen   = Add-Check "Frame generation (experimental)" $cfg.FrameGen "Estima movimento pela imagem; pode produzir rastros e acrescenta atraso. O ganho depende do FPS base e do monitor."
 $kMov   = Add-Check "Cinemáticas em vídeo" $cfg.Movies "Precisa do ffmpeg."
 $kKey   = Add-Check "Teclado como controle (sem controle conectado)" $cfg.Keyboard ""
 Add-Label "Nitidez (RCAS)" $y
@@ -96,6 +96,11 @@ $bPlay.Add_Click({
     if ($cfg.FrameGen) { $a += "-FrameGen" }
     if ($cfg.Sharpen -gt 0) { $a += @("-Sharpen", ($cfg.Sharpen / 10.0).ToString([Globalization.CultureInfo]::InvariantCulture)) }
     # play.ps1 reads these from the environment of the process it starts
+    # An unchecked control must also clear values inherited by the launcher.
+    $env:LD_FSR = if ($cfg.Fsr) { "1" } else { "0" }
+    $env:LD_FXAA = if ($cfg.Fxaa) { "1" } else { "0" }
+    $env:LD_FRAMEGEN = if ($cfg.FrameGen) { "1" } else { "0" }
+    $env:LD_SHARPEN = if ($cfg.Sharpen -gt 0) { ($cfg.Sharpen / 10.0).ToString([Globalization.CultureInfo]::InvariantCulture) } elseif ($cfg.Fsr) { "0.8" } else { "0" }
     $env:SAIL_HOST_PLAY = if ($cfg.Movies) { "1" } else { "0" }
     if ($cfg.Keyboard) { Remove-Item env:PAD_NO_KEYBOARD -ErrorAction SilentlyContinue } else { $env:PAD_NO_KEYBOARD = "1" }
     try {

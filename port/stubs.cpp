@@ -15,6 +15,7 @@
 #include <cstring>
 #include <windows.h>
 #include <io.h>
+#include "../third_party/ps3recomp/libs/video/rsx_perf_trace.h"
 
 #include "ps3emu/ps3types.h"
 #include "ps3emu/error_codes.h"
@@ -32,6 +33,9 @@
 #include "ppu_recomp.h"  /* ppu_context */
 
 typedef void (*hle_ctx_fn)(ppu_context*);
+extern "C" int des_title_fps_enabled(void);
+extern "C" double des_title_frame_dt(double);
+extern "C" uint8_t des_title_frameskip(uint8_t, uint8_t);
 extern "C" void ps3_hle_register_ctx(uint32_t nid, const char* name, hle_ctx_fn fn);
 
 /* sysPrxForUser sys_prx_register_library (NID 0x42B23552): Demon's Souls calls it during
@@ -221,6 +225,7 @@ static uint32_t be32h(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 
 /* item is a host copy of the 32-byte queue entry. */
 static void des_host_inflate(const uint8_t* item)
 {
+    const uint64_t perf_begin = ps3_perf_trace_begin();
     const uint32_t src = be32h(item), dst = be32h(item + 4), slen = be32h(item + 8), dlen = be32h(item + 12);
     const uint32_t stream = be32h(item + 16) & ~1u, flag = be32h(item + 20);
     const u16 bits = (u16)(be32h(item + 24) >> 16);
@@ -235,6 +240,8 @@ static void des_host_inflate(const uint8_t* item)
             printf("[des] inflate src=0x%08X len=0x%X -> got %d of 0x%X\n", src, slen, got, dlen);
     }
 
+    ps3_perf_trace_end("inflate-data", perf_begin, slen, dlen);
+    const uint64_t signal_begin = ps3_perf_trace_begin();
     bool set = !stream;
     if (stream) {
         spu_lockline_lock();
@@ -260,6 +267,7 @@ static void des_host_inflate(const uint8_t* item)
         if (n++ < 8) printf("[des] inflate done: %s set flag 0x%08X bits 0x%04X\n",
                             real_set ? "SPU-side" : "HLE", flag, (unsigned)bits);
     }
+    ps3_perf_trace_end("inflate-signal", signal_begin, stream, flag);
 }
 
 static void des_spurs_lfqueue_initialize(ppu_context* ctx)
@@ -632,27 +640,13 @@ int cellAtracSetSecondBuffer(uint32_t, uint32_t, uint32_t);
  * the patch clears the frameskip flag and feeds the update the real frame
  * time, clamped to 50 ms like the patch's code cave. */
 /* (Diagnostic: =2 applies only the frameskip flag, =3 only the delta time.) */
-static int des_fps_unlocked(void)
-{
-    static int s_on = -1;
-    if (s_on < 0) { const char* e = getenv("DES_FPS_UNLOCK"); s_on = e ? atoi(e) : 0; }
-    return s_on;
-}
 extern "C" uint8_t des_fps_frameskip_flag(uint8_t orig, uint8_t unlocked)
 {
-    int m = des_fps_unlocked();
-    return (m == 1 || m == 2) ? unlocked : orig;
+    return des_title_frameskip(orig, unlocked);
 }
 extern "C" double des_fps_frame_dt(double orig)
 {
-    int m = des_fps_unlocked();
-    if (m != 1 && m != 3) return orig;
-    static LARGE_INTEGER s_freq, s_prev;
-    LARGE_INTEGER now; QueryPerformanceCounter(&now);
-    if (!s_freq.QuadPart) QueryPerformanceFrequency(&s_freq);
-    double dt = s_prev.QuadPart ? (double)(now.QuadPart - s_prev.QuadPart) / (double)s_freq.QuadPart : 0.05;
-    s_prev = now;
-    return (double)(float)(dt < 0.05 ? dt : 0.05);
+    return des_title_frame_dt(orig);
 }
 
 /* DES_FIND=<hex bytes>:<seconds>[:<repeat seconds>]: after that many seconds,

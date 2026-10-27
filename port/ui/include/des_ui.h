@@ -6,10 +6,9 @@
 extern "C" {
 #endif
 
-/* Called first thing in ps3_title_options_init (des_options.cpp), before the
- * game's options are read: loads settings.ini into the environment variables
- * that are not set yet, and installs the overlay (start screen, menu,
- * settings) on the D3D12 backend. DES_UI=0 skips all of it. */
+/* Compatibility entry for the title hooks. The current build uses no_ui.cpp:
+ * no wrapper screens, hotkeys, settings.ini loader or renderer callbacks.
+ * The old port/ui implementation is kept as reference but is not linked. */
 void des_ui_early_init(void);
 
 /* The UI's sounds, by id (ui::Sound in port/ui/src/sound.hpp, in this order). */

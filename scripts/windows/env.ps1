@@ -48,13 +48,8 @@ function Set-DesEnv([string]$Rpcs3) {
     if (-not $env:LD_SURF_WRITEBACK) { $env:LD_SURF_WRITEBACK = "1" }
     # 60 fps (the RPCS3 "Unlock FPS" patch, real frame time) unless DES_FPS_UNLOCK=0.
     if (-not $env:DES_FPS_UNLOCK) { $env:DES_FPS_UNLOCK = "1" }
-    if ($env:DES_FPS_UNLOCK -eq "1") {
-        # Present without vsync, overlap CPU and GPU, cap at 59.94 on the host.
-        if (-not $env:LD_VSYNC)          { $env:LD_VSYNC = "0" }
-        if (-not $env:LD_ASYNC_PRESENT)  { $env:LD_ASYNC_PRESENT = "1" }
-        if (-not $env:LD_PRESENT_MIN_US) { $env:LD_PRESENT_MIN_US = "16683" }
-    } elseif (-not $env:GCM_FLIP_MIN_US) {
-        # The stock game steps a fixed 1/30 s per frame: hold flips to 30 a second.
-        $env:GCM_FLIP_MIN_US = "33300"
-    }
+    # DES_FPS (live menu) owns the frame cap. Do not install a second fixed
+    # cap in GCM/the renderer: it would keep 120 fps mode capped at 60.
+    if (-not $env:LD_VSYNC)         { $env:LD_VSYNC = "0" }
+    if (-not $env:LD_ASYNC_PRESENT) { $env:LD_ASYNC_PRESENT = "1" }
 }

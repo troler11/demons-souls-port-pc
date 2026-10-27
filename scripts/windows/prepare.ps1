@@ -73,6 +73,7 @@ try {
               "--hle-stubs", "out/EBOOT.imports.json", "--output", "recompiled/")
     Remove-Item Env:JT_EXTRA
     Run $py @("-I", "$root\scripts\apply_fps_unlock.py", "recompiled/ppu_recomp_000.cpp")
+    Run $py @("-I", "$root\scripts\apply_title_hooks.py", "recompiled", "EBOOT.ELF")
 
     # 4. Raw SPU programs (not ELF images inside the EBOOT) wrapped as SPU ELFs.
     Run $py @("-I", "$root\scripts\extract_spu_jobs.py", "EBOOT.ELF", $prx, "jobs")

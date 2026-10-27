@@ -32,13 +32,16 @@
  * table. It comes first: everything below is written against that struct. */
 #include "ppu_recomp.h"
 #include "ps3emu/ps3_knob.h"
+#include "frame_timing.h"
+#include <atomic>
 
 extern "C" void ps3_title_options_init(void);
+extern "C" int des_title_frame_rate(void);
 
-static volatile int s_vblank_mhz_custom = 0;
+static std::atomic<int> s_vblank_mhz_custom{0};
 extern "C" void ps3_vblank_set_mhz(int mhz)
 {
-    s_vblank_mhz_custom = mhz;
+    s_vblank_mhz_custom.store(mhz, std::memory_order_release);
 }
 
 extern "C" void ps3_env_bump(void)
@@ -132,6 +135,7 @@ unsigned cellGcm_flip_request_count(void);
 #if defined(_WIN32)
 extern "C" int  rsx_d3d12_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" void rsx_d3d12_backend_present(void);
+extern "C" void rsx_d3d12_backend_shutdown(void);
 extern "C" int  rsx_d3d12_backend_pump_messages(void);
 #  define rsx_backend_init    rsx_d3d12_backend_init
 #  define rsx_backend_present rsx_d3d12_backend_present
@@ -200,6 +204,9 @@ extern "C" int   rsx_live_draw_init(void* hwnd, uint32_t w, uint32_t h,
                                     const uint8_t* (*guest_ptr)(void*, uint32_t, uint32_t, uint32_t),
                                     void* user);
 extern "C" void  rsx_live_draw_present(uint32_t buffer_id);
+extern "C" void  rsx_live_draw_shutdown(void);
+extern "C" void  rsx_null_backend_shutdown(void);
+extern "C" int   cellSaveData_shutdown_ready(void);
 extern "C" int   rsx_null_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" int   rsx_null_backend_pump_messages(void);
 extern "C" void* rsx_null_backend_get_hwnd(void);
@@ -324,7 +331,9 @@ static DWORD WINAPI frame_clock(LPVOID)
      * came in bursts. (From the God of War: Ascension port, patch 0025.) */
     double vblank_us = 1e6 * 1001.0 / 60000.0;
     { const char* e = getenv("PS3_VBLANK_HZ"); if (e) { double v = atof(e); if (v >= 10.0 && v <= 240.0) vblank_us = 1e6 / v; } }
-    if (s_vblank_mhz_custom > 0) vblank_us = 1e6 / (double)s_vblank_mhz_custom;
+    { const char* e = getenv("VBLANK_MHZ"); if (e && atoi(e) > 0) vblank_us = 1e9 / atoi(e); }
+    const double default_vblank_us = vblank_us;
+    vblank_us = des_vblank_period_us(s_vblank_mhz_custom.load(), default_vblank_us);
     double next_tick_us = (double)ps3_qpc_us();
     (void)next_tick;
     /* A guest thread starved for the RSX signals the kick event (a dry fence
@@ -333,7 +342,12 @@ static DWORD WINAPI frame_clock(LPVOID)
     HANDLE kick = (HANDLE)cellGcm_fifo_kick_event();
 
     for (;;) {
-        if (s_vblank_mhz_custom > 0) vblank_us = 1e6 / (double)s_vblank_mhz_custom;
+        const double period = des_vblank_period_us(
+            s_vblank_mhz_custom.load(std::memory_order_acquire), default_vblank_us);
+        if (period != vblank_us) {
+            vblank_us = period;
+            next_tick_us = (double)ps3_qpc_us() + period;
+        }
         double w0 = fc_prof ? fc_now() : 0;
         /* With LD_DRAW_DUMP set, F9 captures every draw of the next frames
          * (the window must have focus). */
@@ -367,20 +381,22 @@ static DWORD WINAPI frame_clock(LPVOID)
          * 13-25 fps spinning, 45-49 not). */
         if (spin_us < 0) {
             const char* e = getenv("FC_SPIN_US");
-            const char* u = getenv("DES_FPS_UNLOCK");
             DWORD_PTR pm = 0, sm = 0; int cpus = 0;
             if (GetProcessAffinityMask(GetCurrentProcess(), &pm, &sm))
                 for (; pm; pm &= pm - 1) cpus++;
-            spin_us = e ? atof(e) : (u && *u == '1' && cpus >= 10) ? 100000.0 : 0.0;
+            spin_us = e ? atof(e) : cpus >= 10 ? 100000.0 : 0.0;
             fprintf(stderr, "[frame_clock] %d logical processors: %s while the game renders\n",
                     cpus, spin_us > 0 ? "spin" : "sleep");
         }
-        if (spin_us > 0 && vm_base) {
+        if (spin_us > 0 && vm_base && des_title_frame_rate() >= 60) {
             uint32_t put; memcpy(&put, vm_base + 0x20002000u, 4);
             const double t = (double)ps3_qpc_us();
             if (put != last_put) { last_put = put; active_until = t + spin_us; }
             if (t < active_until) fc_spin = fc_spin ? fc_spin : 2;
             else if (fc_spin == 2) fc_spin = 0;
+        } else if (fc_spin == 2) {
+            fc_spin = 0;
+            active_until = 0;
         }
         if (fc_spin) {
             SwitchToThread();
@@ -446,8 +462,23 @@ static DWORD WINAPI frame_clock(LPVOID)
             if (pump_now - last_pump_us >= 1000) { last_pump_us = pump_now; pumped = rsx_pump(); }
             if (fc_prof) t_pump += fc_now() - p0;
             if (pumped != 0) {
+#if defined(_WIN32)
+                /* Disabling presentation alone left all PPU/SPU threads
+                 * running forever without a window. Keep servicing FIFO and
+                 * flips while the current savedata operation finishes. */
+                if (!cellSaveData_shutdown_ready()) {
+                    static bool reported = false;
+                    if (!reported) { reported = true; fprintf(stderr, "[shutdown] waiting for in-flight savedata\n"); }
+                    continue;
+                }
+                if (s_rsx_live) { rsx_live_draw_shutdown(); rsx_null_backend_shutdown(); }
+                else rsx_d3d12_backend_shutdown();
+                fprintf(stderr, "[shutdown] window closed, savedata idle, renderer drained\n");
+                exit(0);
+#else
                 rsx_ok = 0;              /* window closed */
                 continue;
+#endif
             }
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip

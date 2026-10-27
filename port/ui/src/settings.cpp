@@ -19,8 +19,8 @@ namespace ui::settings {
 namespace {
 
 constexpr Def kDefs[] = {
-    {"DES_FPS", "", Apply::Live},              // "" = the game's own 30 fps mode; read at each flip
-    {"DES_VSYNC", "1", Apply::Live},           // RSX_VSYNC, live
+    {"DES_FPS", "60", Apply::Live},            // 0 = original 30 fps; read at each flip
+    {"DES_VSYNC", "0", Apply::Live},           // renderer reads the live title policy
     {"DES_SKIP_INTRO", "0", Apply::Restart},
     {"PS3_SAIL_MOVIES", "1", Apply::Live},     // read as each movie opens
     {"DES_AUTO_CONTINUE", "0", Apply::Restart},
@@ -58,8 +58,8 @@ void make_dirs(const std::string& file) {
 void apply_env(std::string_view key, const std::string& value) {
     const std::string k(key);
     if (value.empty() && key != "DES_FPS") return;  // (an unset option stays unset; DES_FPS "" is the game's mode)
-    ps3_setenv(k.c_str(), value.c_str());
-    if (key == "DES_VSYNC") ps3_setenv("RSX_VSYNC", value == "0" ? "0" : "1");
+    ps3_setenv(k.c_str(), key == "DES_FPS" && value.empty() ? "0" : value.c_str());
+    if (key == "DES_VSYNC") ps3_setenv("LD_VSYNC", value == "0" ? "0" : "1");
 }
 
 }  // namespace
@@ -109,10 +109,9 @@ std::string describe() {
 void load_and_apply_env() {
     for (const Def& d : kDefs) {
         if (d.apply == Apply::UiOnly) continue;
-        if (env_set(d.key) || (std::strcmp(d.key, "DES_VSYNC") == 0 && env_set("RSX_VSYNC"))) {
+        if (env_set(d.key)) {
             sPinned.insert(d.key);
             const char* v = std::getenv(d.key);
-            if (!(v && *v)) v = std::getenv("RSX_VSYNC");  // DES_VSYNC pinned through RSX_VSYNC
             sPinnedValues[d.key] = v ? v : "";
         }
     }
@@ -127,7 +126,9 @@ void load_and_apply_env() {
         if (l.empty() || l[0] == '#' || l[0] == ';') continue;
         const size_t eq = l.find('=');
         if (eq == std::string::npos) continue;
-        const std::string key = trim(l.substr(0, eq)), value = trim(l.substr(eq + 1));
+        const std::string key = trim(l.substr(0, eq));
+        std::string value = trim(l.substr(eq + 1));
+        if (key == "DES_FPS" && value.empty()) value = "0";
         const Def* d = find(key);
         if (!d) continue;
         sValues[key] = value;

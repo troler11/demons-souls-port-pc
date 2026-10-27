@@ -19,6 +19,7 @@ Este projeto traduz o código do jogo, do processador principal (PPU) e dos SPUs
 Outubro de 2026, no Windows:
 
 - **Do boot ao tutorial**: avisos, menu principal, criação de personagem, cinemática de abertura e o tutorial (corredor, pátio, combate com os hollows, a torre). Os saves funcionam.
+- **Nome do personagem**: selecione o campo na criação e digite pelo teclado do PC. Enter confirma e Esc cancela; o limite de tamanho é o do jogo.
 - **Renderizador próprio em Direct3D 12** (o "live draw" do ps3recomp, com as mudanças deste projeto): sombras, névoa, partículas suaves, adaptação de exposição, profundidade de campo e oclusão do sol e dos lens flares.
 - **60 fps**: o patch "Unlock FPS" do RPCS3 (Gibbed e Whatcookie), aplicado como código. O corredor do tutorial fica em ~59 fps e o pátio com combate entre 46 e 59 fps. O modo original de 30 fps (`-Fps30`) fica cravado em 30.
 - **Resolução**: janela de 720p a 4K, e a cena renderizada internamente em até 4× (2560×1440, 3840×2160...) pela GPU, com a CPU praticamente igual (`-Resolution`, `-Scale`). **AMD FSR 1** (EASU + RCAS) para renderizar menor e ampliar, e **FXAA** (`-Fsr`, `-Fxaa`, `-Sharpen`).
@@ -26,7 +27,7 @@ Outubro de 2026, no Windows:
 - **Cinemáticas em vídeo** (`.pam`), tocadas pelo [ffmpeg](https://ffmpeg.org) com som: a abertura, a tela-título e a introdução da história.
 - **Áudio** completo, sem cortes: músicas, vozes e efeitos (MultiStream + ATRAC, com o codec do seu firmware).
 - **O kernel real do SPURS** (`libsre`, do seu firmware) roda recompilado, não emulado por aproximação.
-- **Problemas conhecidos**: o limite é a CPU (o código do PS3 recompilado), não a placa de vídeo: num Ryzen 5 5500, 57–60 fps em Boletaria; numa CPU de 6 threads, ~45 (use `-FrameGen`); com 4 threads, 15–25. Algumas partículas podem faltar, e o céu às vezes estoura em áreas externas.
+- **Problemas conhecidos**: cenas pesadas ainda esbarram na CPU e na apresentação dos quadros. As medições dependem da cena; veja [PERFORMANCE.md](docs/PERFORMANCE.md). Frame generation pode reduzir o FPS base e continua experimental. Algumas partículas podem faltar, e o céu às vezes estoura em áreas externas.
 
 O diário técnico completo, com cada problema encontrado e como foi resolvido, está em [docs/REPORT.md](docs/REPORT.md).
 
@@ -78,7 +79,7 @@ No PowerShell, na pasta do repositório:
 
 ## Jogando
 
-O jeito mais fácil: dê dois cliques em **`Jogar.bat`**. Abre uma janela para escolher resolução, resolução interna, taxa de quadros, tela cheia, FSR, FXAA, frame generation, nitidez e as cinemáticas. As escolhas ficam salvas. Na primeira vez ela pede a pasta do RPCS3.
+**`Jogar.bat`** inicia o jogo diretamente. A tela inicial e o menu de configurações durante a gameplay do port foram removidos; F1, Esc e L3+R3 não abrem mais essa interface. O menu original do jogo continua funcionando. A nova tela de menu pode chamar `scripts/windows/play.ps1` com os parâmetros abaixo e variáveis de [ENVIRONMENT.md](docs/ENVIRONMENT.md). O antigo `settings.ini` da interface não é carregado. Na primeira execução, informe o RPCS3 pela linha de comando.
 
 Pela linha de comando:
 
@@ -92,10 +93,10 @@ Pela linha de comando:
 .\scripts\windows\play.ps1 -Resolution 1080p -Fullscreen   # tela cheia sem bordas
 .\scripts\windows\play.ps1 -Resolution 4k -Fsr             # AMD FSR 1: renderiza menor e amplia (GPU mais fraca)
 .\scripts\windows\play.ps1 -Fxaa                           # anti-aliasing FXAA
-.\scripts\windows\play.ps1 -FrameGen                       # frame generation: 60 -> 120 na tela
+.\scripts\windows\play.ps1 -FrameGen                       # interpolação experimental; pode reduzir o FPS base
 ```
 
-**Frame generation** (`-FrameGen`): o jogo é limitado pela CPU e a placa de vídeo fica quase ociosa, então a GPU cria um quadro entre cada dois do jogo, estimando o movimento pelas próprias imagens. A tela mostra o dobro de quadros sem custo de CPU, com meio quadro a mais de atraso. Só faz diferença num monitor acima de 60 Hz. Alternativas no driver: AMD Fluid Motion Frames (Adrenalin, RX 6000/7000+), NVIDIA Smooth Motion (RTX 40/50) ou o Lossless Scaling.
+**Frame generation** (`-FrameGen`): interpolação experimental por comparação de imagens, sem profundidade ou vetores do jogo. A apresentação agora usa uma thread própria: na cena pesada testada em 1080p, passou de 26,85 FPS base no caminho serial para 34,37, contra 36,13 sem geração. Ainda acrescenta atraso, pode produzir rastros e não garante o dobro de quadros visíveis. Mantenha desligado para priorizar resposta do controle; medições e limites em [PERFORMANCE.md](docs/PERFORMANCE.md).
 
 **F11** ou **Alt+Enter** alternam entre janela e tela cheia durante o jogo.
 
