@@ -98,6 +98,22 @@ enum { UnitPixel = 2, FontRegular = 0, FontBold = 1, SmoothAntiAlias = 4, TextAn
        InterpHighQualityBicubic = 7, PixelOffsetHighQuality = 2, WrapTileFlipXY = 3,
        AlignNear = 0, AlignCenter = 1, AlignFar = 2, Format32bppPARGB = 0x000E200B,
        StringNoWrap = 0x00001000, TrimEllipsis = 3, CombineReplace = 0 };
+/* An image decoded into memory: GdipLoadImageFromFile keeps the file open for
+ * the image's lifetime, and the launcher held the save's ICON0.PNG locked --
+ * the game (and the test scripts' save restore) could not replace it. */
+static GpImage* load_image_copy(const WCHAR* path)
+{
+    GpImage* file = NULL; GpImage* copy = NULL; GpGraphics* gr = NULL; UINT w = 0, h = 0;
+    if (GdipLoadImageFromFile(path, &file) != 0 || !file) return NULL;
+    GdipGetImageWidth(file, &w); GdipGetImageHeight(file, &h);
+    if (w && h && GdipCreateBitmapFromScan0((INT)w, (INT)h, 0, 0x26200A /* 32bppARGB */, NULL, &copy) == 0 &&
+        GdipGetImageGraphicsContext(copy, &gr) == 0) {
+        GdipDrawImageRectI(gr, file, 0, 0, (INT)w, (INT)h);
+        GdipDeleteGraphics(gr);
+    } else if (copy) { GdipDisposeImage(copy); copy = NULL; }
+    GdipDisposeImage(file);
+    return copy;
+}
 
 /* ---- layout (logical units; g.s scales to pixels) ----------------------- */
 #define WIN_W 1280
@@ -499,7 +515,7 @@ static void scan_saves(void)
             if (GetFileAttributesExW(p, GetFileExInfoStandard, &fa)) s->mtime = fa.ftLastWriteTime;
             s->size = dir_size(sd);
             path_join(p, sd, L"ICON0.PNG");
-            if (file_exists(p)) GdipLoadImageFromFile(p, &s->icon);
+            if (file_exists(p)) s->icon = load_image_copy(p);
             g.nslots++;
         } while (FindNextFileW(h, &fd));
         FindClose(h);
@@ -1741,7 +1757,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR args, int show)
 
     wchar_t pic[MAX_PATH];
     path_join(pic, g.work, L"disc\\PS3_GAME\\PIC1.PNG");
-    if (!file_exists(pic) || GdipLoadImageFromFile(pic, &g.hero) != 0) g.hero = NULL;
+    g.hero = file_exists(pic) ? load_image_copy(pic) : NULL;
     read_info();
     scan_saves();
 

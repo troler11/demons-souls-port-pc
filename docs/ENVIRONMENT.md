@@ -92,6 +92,7 @@ inicial ou `Slayer` se estiver vazio). Ausente/vazia/`0` usa a janela normalment
 | `LD_FIFO_ASYNC=1` | Experimento: worker D3D12 com três blocos de 2.048 comandos copiados. Desligado por padrão; a primeira medição piorou o FPS devido às drenagens frequentes. Requer batching; não habilita snapshots de quadros como `RF_ASYNC` do inFAMOUS. |
 | `LD_FIFO_PROF=1` | No worker experimental, conta comandos/blocos/barreiras com trabalho pendente e tempos de espera/execução. Tempos de parede, não amostras de CPU. |
 | `LD_SHADOW` | Comparação de sombra (ligada). |
+| `LD_SHADOW_SCALE_CB=0` | Volta a embutir no shader a escala de coordenada do shadow map, como antes (padrão: vai no constant buffer, `fp_shadow[unidade]`). Embutida, cada escala de resolução gerava outro conjunto de pixel shaders. |
 
 ## Áudio
 
@@ -167,6 +168,8 @@ inicial ou `Slayer` se estiver vazio). Ausente/vazia/`0` usa a janela normalment
 | `LD_SWAP_COUNT=3` | Três buffers no swap chain (padrão 2; sem ganho medido). |
 | `LD_SRV_KEEP=0` | Cada draw volta as superfícies que leu para alvo de renderização logo depois (padrão: ficam em leitura enquanto os draws seguintes as leem). |
 | `LD_ASYNC_SHADERS=0` | Compila shaders fora do cache na thread do renderizador, como antes (padrão: em segundo plano; os draws que dependem dele esperam 1–3 quadros). |
+| `LD_ASYNC_PSO=0` | Cria na thread do renderizador os pipelines que não estão na library, como antes (padrão: em segundo plano). |
+| `LD_ASYNC_PSO_WAIT_MS` / `LD_ASYNC_PSO_FRAME_MS` | Quanto o renderizador espera por um pipeline em criação: por pipeline (padrão 4) e por quadro (padrão 8). Passado isso, o draw sai quando o pipeline fica pronto. |
 | `LD_GEOM_ARENA=0` | Geometria do cache volta a ser copiada para os anéis a cada draw (padrão: área persistente). |
 | `LD_CB_REUSE=0`, `LD_SRV_REUSE=0` | Sempre reenviar as constantes de vértice / a tabela de descritores (padrão: reaproveitar quando não mudaram). |
 | `LD_DESCRIPTOR_CACHE=1` | Índices experimentais de tabelas SRV/samplers, desligados por padrão: não houve ganho consistente de FPS sem diagnóstico. Chave completa dos 16 slots; mudanças de descritores CPU e reciclagem dos anéis invalidam as entradas. Fence sem reciclagem preserva cópias imutáveis. Arrays fixos de 698.880 bytes, sem ampliar os heaps GPU. `LD_SRV_REUSE=0` também desliga o novo índice SRV. Reiniciar ao trocar; contadores com `LD_FLUSH_PROF=1`. |
