@@ -34,6 +34,7 @@
 #include "ps3emu/ps3_knob.h"
 #include "frame_timing.h"
 #include <atomic>
+#include <intrin.h>
 
 extern "C" void ps3_title_options_init(void);
 extern "C" int des_title_frame_rate(void);
@@ -247,6 +248,16 @@ static int rsx_pump(void)
     return rsx_backend_pump();
 }
 
+/* frame_clock's time in the FIFO drain and in present, in TSC ticks, always
+ * counted (two rdtsc per call): the [spike] log (LD_SPIKE_LOG_MS) splits a
+ * long frame into renderer work and renderer idle with them. Read on this
+ * thread only (present runs here). */
+static unsigned long long s_fc_fifo_tsc, s_fc_pres_tsc;
+extern "C" void des_fc_split(unsigned long long* fifo, unsigned long long* pres)
+{
+    *fifo = s_fc_fifo_tsc; *pres = s_fc_pres_tsc;
+}
+
 static void present_guest_frame(void)
 {
     rsx_present();
@@ -321,9 +332,13 @@ static DWORD WINAPI frame_clock(LPVOID)
     double t_wait = 0, t_fifo = 0, t_pres = 0, t_pump = 0; unsigned n_fifo = 0;
     LARGE_INTEGER t_rep; QueryPerformanceCounter(&t_rep);
     auto fc_now = [&]() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)fq.QuadPart; };
-    auto fifo = [&]() { double a = fc_prof ? fc_now() : 0; cellGcm_rsx_process_fifo();
+    auto fifo = [&]() { double a = fc_prof ? fc_now() : 0;
+                        const unsigned long long c0 = __rdtsc(); cellGcm_rsx_process_fifo();
+                        s_fc_fifo_tsc += __rdtsc() - c0;
                         if (fc_prof) { t_fifo += fc_now() - a; n_fifo++; } };
-    auto present = [&]() { double a = fc_prof ? fc_now() : 0; present_guest_frame();
+    auto present = [&]() { double a = fc_prof ? fc_now() : 0;
+                           const unsigned long long c0 = __rdtsc(); present_guest_frame();
+                           s_fc_pres_tsc += __rdtsc() - c0;
                            if (fc_prof) t_pres += fc_now() - a; };
 
     /* Vblank on the QPC clock at the real 59.94 Hz (PS3_VBLANK_HZ overrides).

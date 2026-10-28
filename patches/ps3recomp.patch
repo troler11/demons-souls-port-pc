@@ -3360,7 +3360,7 @@ index 4e175d2..e07f68c 100644
       * array declaration so 2D-only programs are byte-identical. When any unit
       * is a cubemap, declare each unit individually at its t-register so the
 diff --git a/libs/video/rsx_live_draw.c b/libs/video/rsx_live_draw.c
-index 9e3996b..226c4c9 100644
+index 9e3996b..4dc0fcc 100644
 --- a/libs/video/rsx_live_draw.c
 +++ b/libs/video/rsx_live_draw.c
 @@ -36,6 +36,11 @@ void rsx_live_draw_set_display_buffer(
@@ -8702,7 +8702,7 @@ index 9e3996b..226c4c9 100644
      memset(&g, 0, sizeof(g));
      if (dc.verts) { free(dc.verts); dc.verts = NULL; dc.cap_verts = 0; }
      if (dc.refs) { free(dc.refs); dc.refs = NULL; dc.cap_refs = 0; }
-@@ -10104,6 +13769,118 @@ void rsx_live_draw_shutdown(void)
+@@ -10104,6 +13769,136 @@ void rsx_live_draw_shutdown(void)
          dc.compact_capacity = 0;
      }
      if (dc.cuts) { free(dc.cuts); dc.cuts = NULL; dc.cap_cuts = 0; }
@@ -8759,10 +8759,14 @@ index 9e3996b..226c4c9 100644
 + * default and cheap (a QPC read per present, at most 300 lines), so a normal
 + * play session already says whether a visible jump (an enemy that "teleports")
 + * was a long frame and what caused it. */
++void des_fc_split(unsigned long long* fifo, unsigned long long* pres);   /* port/main.cpp */
++extern volatile long long g_ps3_short_usleep_tsc;                       /* sys_timer.c */
++unsigned cellGcm_flip_request_count(void);                              /* cellGcmSys.c */
 +static void ld_spike_note(void)
 +{
 +    static int ms = -1; static LARGE_INTEGER qf, last; static u32 lines;
 +    static long sh0, ap0; static u32 ps0; static unsigned long long dr0, gr0;
++    static unsigned long long tsc0, fifo0, pres0; static long long us0; static unsigned fl0;
 +    if (ms < 0) {
 +        const char* e = getenv("LD_SPIKE_LOG_MS"); ms = e && *e ? atoi(e) : 40;
 +        QueryPerformanceFrequency(&qf);
@@ -8772,16 +8776,30 @@ index 9e3996b..226c4c9 100644
 +    const long sh = s_ash.done + s_ash.failed, ap = s_apso.created;
 +    const u32 ps = g.n_psos;
 +    const unsigned long long dr = g_ld_stats.group_drop_pso, gr = g_ld_stats.groups_executed;
++    /* Where the gap went: frame_clock draining the FIFO (renderer work) and
++     * presenting (incl. waiting on the present worker); the rest it idled,
++     * i.e. the guest had not handed it the frame yet. poll: guest time in
++     * sub-millisecond usleeps (HighGraphics waiting on its SPU job; summed
++     * over threads, so it can exceed the gap). */
++    const unsigned long long tsc = __rdtsc();
++    unsigned long long fifo = 0, pres = 0; des_fc_split(&fifo, &pres);
++    const long long us = g_ps3_short_usleep_tsc;
++    const unsigned fl = cellGcm_flip_request_count();
 +    if (last.QuadPart) {
 +        const double gap = (double)(now.QuadPart - last.QuadPart) * 1000.0 / (double)qf.QuadPart;
-+        if (gap >= ms && lines < 300) {
++        if (gap >= ms && lines < 300 && tsc > tsc0) {
++            const double per = gap / (double)(tsc - tsc0);   /* ms per tick over this gap */
++            const double f = (double)(fifo - fifo0) * per, pr = (double)(pres - pres0) * per;
 +            lines++;
-+            fprintf(stderr, "[spike] frame=%u gap=%.1fms shaders=%ld pso_new=%u pso_async=%ld drop_pso=%llu draws=%llu%s\n",
-+                    g_ld_frames, gap, sh - sh0, ps - ps0, ap - ap0, dr - dr0, gr - gr0,
++            fprintf(stderr, "[spike] frame=%u gap=%.1fms fifo=%.1f present=%.1f idle=%.1f poll=%.1f"
++                            " flips=%u shaders=%ld pso_new=%u pso_async=%ld drop_pso=%llu draws=%llu%s\n",
++                    g_ld_frames, gap, f, pr, gap - f - pr, (double)(us - us0) * per,
++                    fl - fl0, sh - sh0, ps - ps0, ap - ap0, dr - dr0, gr - gr0,
 +                    g_ld_movie_mode ? " movie" : "");
 +        }
 +    }
 +    last = now; sh0 = sh; ap0 = ap; ps0 = ps; dr0 = dr; gr0 = gr;
++    tsc0 = tsc; fifo0 = fifo; pres0 = pres; us0 = us; fl0 = fl;
 +}
 +
 +void rsx_live_draw_present(u32 buffer_id)
@@ -19597,10 +19615,20 @@ index 19ecafc..e724c5f 100644
      { static int _n=0; if (getenv("SEMTID") && _n < 60000)
          fprintf(stderr, "[WAKE tid=%llu] semaphore_post(sem=%u count=%d)\n",
 diff --git a/runtime/syscalls/sys_timer.c b/runtime/syscalls/sys_timer.c
-index 78b3e38..2e0d4af 100644
+index 78b3e38..abd0d4c 100644
 --- a/runtime/syscalls/sys_timer.c
 +++ b/runtime/syscalls/sys_timer.c
-@@ -108,7 +108,53 @@ static void write_be64(uint32_t addr, uint64_t val)
+@@ -12,6 +12,9 @@
+ #include <stdlib.h>   /* getenv -- an implicit decl returns int, truncating the pointer */
+ #include <string.h>
+ #include <stdlib.h>
++#ifdef _WIN32
++#include <intrin.h>
++#endif
+ 
+ /* ---------------------------------------------------------------------------
+  * Globals
+@@ -108,7 +111,72 @@ static void write_be64(uint32_t addr, uint64_t val)
   *
   * r3 = microseconds
   * -----------------------------------------------------------------------*/
@@ -19613,7 +19641,26 @@ index 78b3e38..2e0d4af 100644
 + * longest wait, and the share of the polling thread's wall time spent there.
 + * Demon's Souls' HighGraphics waits on its SPURS command job at 0x00ACB0A0. */
 +static int64_t sys_timer_usleep_impl(ppu_context* ctx);
++/* Wall time (TSC ticks) of every sub-millisecond usleep: the guest polling
++ * another agent -- in Demon's Souls, HighGraphics waiting on its SPURS command
++ * job. Read by the [spike] log (LD_SPIKE_LOG_MS). */
++volatile long long g_ps3_short_usleep_tsc;
++static int64_t sys_timer_usleep_poll(ppu_context* ctx);
  int64_t sys_timer_usleep(ppu_context* ctx)
++{
++#ifdef _WIN32
++    if (LV2_ARG_U64(ctx, 0) < 1000) {
++        const unsigned long long c0 = __rdtsc();
++        const int64_t r = sys_timer_usleep_poll(ctx);
++        _InterlockedExchangeAdd64(&g_ps3_short_usleep_tsc, (long long)(__rdtsc() - c0));
++        return r;
++    }
++    return sys_timer_usleep_poll(ctx);
++#else
++    return sys_timer_usleep_impl(ctx);
++#endif
++}
++static int64_t sys_timer_usleep_poll(ppu_context* ctx)
 +{
 +#ifdef _WIN32
 +    static long long want = -1;
@@ -19654,7 +19701,7 @@ index 78b3e38..2e0d4af 100644
  {
      uint64_t usec = LV2_ARG_U64(ctx, 0);
      { extern unsigned long long ps3_qpc_us(void);
-@@ -217,19 +263,86 @@ int64_t sys_timer_usleep(ppu_context* ctx)
+@@ -217,19 +285,86 @@ int64_t sys_timer_usleep(ppu_context* ctx)
          ppu_log_host_chain("usleep1ms"); } }
  
  #ifdef _WIN32
@@ -19744,7 +19791,7 @@ index 78b3e38..2e0d4af 100644
          /* Sub-millisecond sleep. Sleep()/waitable timers round up to the
           * ~0.5-1 ms scheduler quantum, far too coarse for a guest that relies
           * on accurate microsecond pacing -- a short usleep() spin waiting on
-@@ -243,7 +356,15 @@ int64_t sys_timer_usleep(ppu_context* ctx)
+@@ -243,7 +378,15 @@ int64_t sys_timer_usleep(ppu_context* ctx)
          QueryPerformanceCounter(&qpc_start);
          const int64_t qpc_deadline = qpc_start.QuadPart +
              (int64_t)((usec * (uint64_t)s_qpc_freq.QuadPart) / 1000000ULL);
