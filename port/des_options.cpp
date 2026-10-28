@@ -182,7 +182,21 @@ constexpr uint32_t kFlipModeObj  = 0x01AD6298u;   /* -> engine object */
 constexpr uint32_t kFlipMode60   = 0x6ECu;
 constexpr uint32_t kFlipNoSkip   = 0x6EDu;
 constexpr uint32_t kFrameDt      = 0x018C8DB4u;   /* float, seconds */
-constexpr float    kMaxFrameDt   = 0.05f;
+/* Longest game step one frame may take, in seconds. DES_FPS_DT_MAX_MS=<ms>
+ * (17-100, default 50, the RPCS3 patch's clamp): a lower cap makes a long
+ * frame (the heavy draws of a busy scene) advance the world by less than the
+ * time that passed -- a brief slow-down instead of an enemy jumping ahead. */
+static float max_frame_dt()
+{
+    static float v = -1.0f;
+    if (v < 0.0f) {
+        const char* e = getenv("DES_FPS_DT_MAX_MS");
+        const int ms = e && *e ? atoi(e) : 50;
+        v = (ms < 17 ? 17 : ms > 100 ? 100 : ms) / 1000.0f;
+        if (e && *e) fprintf(stderr, "[des] DES_FPS_DT_MAX_MS=%d: frame step capped at %.0f ms\n", ms, v * 1000.0f);
+    }
+    return v;
+}
 constexpr float    kCutsceneDt   = 1.0f / 30.0f;
 constexpr int      kPs3VblankMhz = 59940;
 
@@ -302,7 +316,7 @@ void fps_on_flip_request()
     float dt = kCutsceneDt;
     if (!cut && last != clock::time_point()) {
         dt = std::chrono::duration<float>(now - last).count();
-        if (dt > kMaxFrameDt) dt = kMaxFrameDt;
+        if (dt > max_frame_dt()) dt = max_frame_dt();
     }
     uint32_t bits;
     memcpy(&bits, &dt, 4);
@@ -559,7 +573,7 @@ extern "C" double des_title_frame_dt(double original)
     if (fps && !(fps >= 60 && cutscene_playing()) && previous_fps == fps &&
         previous != clock::time_point()) {
         dt = std::chrono::duration<double>(now - previous).count();
-        if (dt > kMaxFrameDt) dt = kMaxFrameDt;
+        if (dt > max_frame_dt()) dt = max_frame_dt();
     }
     previous = now;
     previous_fps = fps;
