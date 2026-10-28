@@ -169,6 +169,7 @@ inicial ou `Slayer` se estiver vazio). Ausente/vazia/`0` usa a janela normalment
 | `LD_SRV_KEEP=0` | Cada draw volta as superfícies que leu para alvo de renderização logo depois (padrão: ficam em leitura enquanto os draws seguintes as leem). |
 | `LD_ASYNC_SHADERS=0` | Compila shaders fora do cache na thread do renderizador, como antes (padrão: em segundo plano; os draws que dependem dele esperam 1–3 quadros). |
 | `LD_ASYNC_PSO=0` | Cria na thread do renderizador os pipelines que não estão na library, como antes (padrão: em segundo plano). |
+| `LD_SPIKE_LOG_MS=<ms>` | Registra (`[spike]`) cada quadro guest apresentado esse tempo ou mais depois do anterior, com shaders compilados, PSOs criados e draws pulados no intervalo. Padrão 40, ligado; `0` desliga. Até 300 linhas por sessão, custo de uma leitura de QPC por quadro. |
 | `LD_ASYNC_PSO_WAIT_MS` / `LD_ASYNC_PSO_FRAME_MS` | Quanto o renderizador espera por um pipeline em criação: por pipeline (padrão 4) e por quadro (padrão 8). Passado isso, o draw sai quando o pipeline fica pronto. |
 | `LD_GEOM_ARENA=0` | Geometria do cache volta a ser copiada para os anéis a cada draw (padrão: área persistente). |
 | `LD_CB_REUSE=0`, `LD_SRV_REUSE=0` | Sempre reenviar as constantes de vértice / a tabela de descritores (padrão: reaproveitar quando não mudaram). |

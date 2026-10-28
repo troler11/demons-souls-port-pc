@@ -3360,7 +3360,7 @@ index 4e175d2..e07f68c 100644
       * array declaration so 2D-only programs are byte-identical. When any unit
       * is a cubemap, declare each unit individually at its t-register so the
 diff --git a/libs/video/rsx_live_draw.c b/libs/video/rsx_live_draw.c
-index 9e3996b..c52fd92 100644
+index 9e3996b..226c4c9 100644
 --- a/libs/video/rsx_live_draw.c
 +++ b/libs/video/rsx_live_draw.c
 @@ -36,6 +36,11 @@ void rsx_live_draw_set_display_buffer(
@@ -7415,8 +7415,8 @@ index 9e3996b..c52fd92 100644
 +    fprintf(stderr, "[output] %ux%u window, frames scaled from %ux%u; fxaa %d fsr %d sharpen %.2f\n",
 +            ld_out_w(), ld_out_h(), g.width, g.height, ld_post_fxaa(), ld_post_fsr(), ld_post_sharp());
 +    return 1;
- }
- 
++}
++
 +/* Intermediate i, at least w x h, with its RTV and its SRV (blit heap slot
 + * LD_SWAP_BUFFERS + i); kept in PIXEL_SHADER_RESOURCE between passes. Grows
 + * only: a replaced one may still be in flight, so it is not released. */
@@ -7777,8 +7777,8 @@ index 9e3996b..c52fd92 100644
 +    D3D12_UNORDERED_ACCESS_VIEW_DESC uv = {0};
 +    uv.Format = f; uv.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 +    g.dev->lpVtbl->CreateUnorderedAccessView(g.dev, r, NULL, &uv, fg_cpu(slot));
-+}
-+
+ }
+ 
 +static int fg_init(void)
 +{
 +    if (s_fg.ok) return 1;
@@ -8254,7 +8254,7 @@ index 9e3996b..c52fd92 100644
 +}
 +
 +static UINT ld_present_interval(void)
-+{
+ {
 +    const LONG title_vsync = InterlockedCompareExchange(&s_title_vsync, -1, -1);
 +    if (title_vsync >= 0) return (UINT)title_vsync;
 +    static int v = -1;
@@ -8263,7 +8263,7 @@ index 9e3996b..c52fd92 100644
 +}
 +
 +static void rsx_live_draw_present_rgba_unlocked(const uint8_t* rgba, u32 w, u32 h)
- {
++{
 +    ld_srv_restore_all();   /* surfaces back to RENDER_TARGET (LD_SRV_KEEP) */
 +    fg_worker_drain();
      const int composite = ld_movie_composite_ui_enabled();
@@ -8702,7 +8702,7 @@ index 9e3996b..c52fd92 100644
      memset(&g, 0, sizeof(g));
      if (dc.verts) { free(dc.verts); dc.verts = NULL; dc.cap_verts = 0; }
      if (dc.refs) { free(dc.refs); dc.refs = NULL; dc.cap_refs = 0; }
-@@ -10104,6 +13769,86 @@ void rsx_live_draw_shutdown(void)
+@@ -10104,6 +13769,118 @@ void rsx_live_draw_shutdown(void)
          dc.compact_capacity = 0;
      }
      if (dc.cuts) { free(dc.cuts); dc.cuts = NULL; dc.cap_cuts = 0; }
@@ -8753,8 +8753,40 @@ index 9e3996b..c52fd92 100644
 +
 +void rsx_live_draw_method(u32 method, u32 arg)
 +{ ld_lock(); rsx_live_draw_method_unlocked(method, arg); ld_unlock(); }
++/* LD_SPIKE_LOG_MS=<ms> (default 40; 0 = off): one line for each guest frame
++ * whose present came that long after the previous one, with what the renderer
++ * did in between -- shaders compiled, pipelines created, draws skipped. On by
++ * default and cheap (a QPC read per present, at most 300 lines), so a normal
++ * play session already says whether a visible jump (an enemy that "teleports")
++ * was a long frame and what caused it. */
++static void ld_spike_note(void)
++{
++    static int ms = -1; static LARGE_INTEGER qf, last; static u32 lines;
++    static long sh0, ap0; static u32 ps0; static unsigned long long dr0, gr0;
++    if (ms < 0) {
++        const char* e = getenv("LD_SPIKE_LOG_MS"); ms = e && *e ? atoi(e) : 40;
++        QueryPerformanceFrequency(&qf);
++    }
++    if (ms <= 0) return;
++    LARGE_INTEGER now; QueryPerformanceCounter(&now);
++    const long sh = s_ash.done + s_ash.failed, ap = s_apso.created;
++    const u32 ps = g.n_psos;
++    const unsigned long long dr = g_ld_stats.group_drop_pso, gr = g_ld_stats.groups_executed;
++    if (last.QuadPart) {
++        const double gap = (double)(now.QuadPart - last.QuadPart) * 1000.0 / (double)qf.QuadPart;
++        if (gap >= ms && lines < 300) {
++            lines++;
++            fprintf(stderr, "[spike] frame=%u gap=%.1fms shaders=%ld pso_new=%u pso_async=%ld drop_pso=%llu draws=%llu%s\n",
++                    g_ld_frames, gap, sh - sh0, ps - ps0, ap - ap0, dr - dr0, gr - gr0,
++                    g_ld_movie_mode ? " movie" : "");
++        }
++    }
++    last = now; sh0 = sh; ap0 = ap; ps0 = ps; dr0 = dr; gr0 = gr;
++}
++
 +void rsx_live_draw_present(u32 buffer_id)
 +{
++    ld_spike_note();
 +    if (!ld_present_prof_on()) {
 +        ld_lock(); rsx_live_draw_present_unlocked(buffer_id); ld_unlock();
 +        return;
