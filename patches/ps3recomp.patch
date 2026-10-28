@@ -9378,7 +9378,7 @@ index d9ce0c3..3fa7941 100644
      uint64_t r = fn(ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], ctx->gpr[6],
                      ctx->gpr[7], ctx->gpr[8], ctx->gpr[9], ctx->gpr[10]);
 diff --git a/runtime/ppu/ppu_loader.cpp b/runtime/ppu/ppu_loader.cpp
-index 1baea72..dc0e813 100644
+index 1baea72..21608b5 100644
 --- a/runtime/ppu/ppu_loader.cpp
 +++ b/runtime/ppu/ppu_loader.cpp
 @@ -471,6 +471,17 @@ static uint32_t samp_lookup(uintptr_t rip)
@@ -9981,7 +9981,7 @@ index 1baea72..dc0e813 100644
  extern "C" void spu_coh_notify_write(uint32_t addr);
  
  /* ---------------------------------------------------------------------------
-@@ -880,6 +1384,31 @@ extern "C" void ppu_resv_break_store(uint64_t ea)
+@@ -880,6 +1384,49 @@ extern "C" void ppu_resv_break_store(uint64_t ea)
              c->reserve_addr = PPU_RESV_INVALID;
      }
  }
@@ -10000,8 +10000,26 @@ index 1baea72..dc0e813 100644
 + * an SPU has reserved (PUTLLC, PUTLLUC, DMA put, a coherent PPU store), under
 + * that line's lock-line lock -- the lock ppu_stwcx32/stdcx64 now hold across
 + * their own recheck and CAS. */
++/* Lines the PPU has used a store-conditional on (one bit per 128-byte line,
++ * sticky, like the SPU coherence bitmap). SPU commits run millions of times a
++ * second, almost all on lines only SPUs touch (the SPURS kernel's polling);
++ * walking every PPU context on each of them cost ~5 fps in Boletaria. Only
++ * lines with this bit set can hold a PPU reservation worth breaking -- except
++ * a line's very first lwarx/stwcx pair, before the bit is set. */
++static unsigned char s_ppu_atomic_lines[(1u << 25) / 8];
++static inline void ppu_atomic_line_mark(uint32_t ea)
++{
++    const uint32_t l = ea >> 7;
++    const unsigned char bit = (unsigned char)(1u << (l & 7));
++    if (!(s_ppu_atomic_lines[l >> 3] & bit)) _InterlockedOr8((volatile char*)&s_ppu_atomic_lines[l >> 3], (char)bit);
++}
 +extern "C" void ppu_resv_break_line(uint32_t line)
 +{
++    static int on = -1;                  /* PPU_RESV_LINE=0: the old per-word behaviour, for A/B only */
++    if (on < 0) { const char* e = getenv("PPU_RESV_LINE"); on = !(e && *e == '0'); }
++    if (!on) return;
++    { const uint32_t l = line >> 7;
++      if (!((s_ppu_atomic_lines[l >> 3] >> (l & 7)) & 1u)) return; }
 +    line &= ~127u;
 +    long n = g_resv_ctx_n; if (n > PPU_RESV_MAX) n = PPU_RESV_MAX;
 +    for (long i = 0; i < n; i++) {
@@ -10013,8 +10031,11 @@ index 1baea72..dc0e813 100644
  static inline volatile LONG* resv_slot(uint64_t ea) { return &g_resv_locks[((uint32_t)ea >> 4) & (PPU_RESV_LOCKS - 1)]; }
  static inline void resv_lock(volatile LONG* L)   { while (_InterlockedExchange(L, 1)) { while (*L) YieldProcessor(); } }
  static inline void resv_unlock(volatile LONG* L) { _InterlockedExchange(L, 0); }
-@@ -934,12 +1463,19 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
+@@ -932,14 +1479,22 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
+                                            0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+     ppu_context* self = g_active_ctx;
      if (resv_diag() && self) resv_check_reg(self);
++    ppu_atomic_line_mark((uint32_t)ea);
      volatile LONG* L = resv_slot(ea);
      resv_lock(L);
 -    if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }   /* reservation lost */
@@ -10038,7 +10059,7 @@ index 1baea72..dc0e813 100644
      /* SPU_PUTLLC_WHY=1: count PPU commits that land on a line an SPU has
       * reserved. If an SPU's PUTLLC never succeeds for "no reservation", the
       * PPU hammering the same 128-byte line is one of only two agents that can
-@@ -950,15 +1486,17 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
+@@ -950,15 +1505,17 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
              if ((++n % 100000) == 1)
                  fprintf(stderr, "[ppu-steals-resv] %llu: PPU CAS on reserved line 0x%08X\n",
                          n, (uint32_t)ea & ~127u); } }
@@ -10058,8 +10079,11 @@ index 1baea72..dc0e813 100644
      /* PPU_CASWATCH=<hex ea>: log successful stwcx. on that 128-byte line.
       * PPU_WWATCH hooks plain stores only; an atomic counter (a semaphore an SPU
       * spins on) is written exclusively through here and looked untouched. */
-@@ -1019,13 +1557,16 @@ extern "C" int ppu_stdcx64(uint64_t ea, uint64_t expected, uint64_t val)
+@@ -1017,15 +1574,19 @@ extern "C" int ppu_stdcx64(uint64_t ea, uint64_t expected, uint64_t val)
+                                            0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+     ppu_context* self = g_active_ctx;
      if (resv_diag() && self) resv_check_reg(self);
++    ppu_atomic_line_mark((uint32_t)ea);
      volatile LONG* L = resv_slot(ea);   /* ea and ea+4 share a 16-byte-block slot */
      resv_lock(L);
 -    if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }
@@ -10078,7 +10102,7 @@ index 1baea72..dc0e813 100644
      }
      if (ok) { ppu_resv_break(ea); ppu_resv_break(ea + 4); }  /* 8-byte store spans two words */
      resv_unlock(L);
-@@ -1453,10 +1994,10 @@ extern "C" int* ps3_ppu_vcall_sp_slot(void) { return &g_vcall_sp; }
+@@ -1453,10 +2014,10 @@ extern "C" int* ps3_ppu_vcall_sp_slot(void) { return &g_vcall_sp; }
  #define VM_WRITE_COH(a, src, n)                                               \
      do {                                                                      \
          if (spu_coh_is_reserved((uint32_t)(a))) {                             \
@@ -10091,7 +10115,7 @@ index 1baea72..dc0e813 100644
          } else {                                                              \
              memcpy(vm_base + (uint32_t)(a), (src), (n));                      \
          }                                                                     \
-@@ -1546,6 +2087,7 @@ static inline void ppu_null_read_report(uint32_t a, int width, void* ra)
+@@ -1546,6 +2107,7 @@ static inline void ppu_null_read_report(uint32_t a, int width, void* ra)
  /* ppu_recomp.h's inline loads (vm_read*_inl) skip the out-of-line accessors'
   * probes, so they run only while no read diagnostic is armed. */
  extern "C" int vm_inline_ok = 0;
@@ -10099,7 +10123,7 @@ index 1baea72..dc0e813 100644
  static struct VmInlineInit {
      VmInlineInit() {
          static const char* const vars[] = {
-@@ -1554,6 +2096,13 @@ static struct VmInlineInit {
+@@ -1554,6 +2116,13 @@ static struct VmInlineInit {
          int d = 0;
          for (int i = 0; vars[i]; i++) if (getenv(vars[i])) d = 1;
          vm_inline_ok = !d;
@@ -10113,7 +10137,7 @@ index 1baea72..dc0e813 100644
      }
  } s_vm_inline_init;
  
-@@ -1771,7 +2320,21 @@ static void ww_arm_inline_window(uint32_t ww)
+@@ -1771,7 +2340,21 @@ static void ww_arm_inline_window(uint32_t ww)
      g_ww_lo = ww & ~15u;
      g_ww_hi = (ww & ~15u) + len;
  }
@@ -10136,7 +10160,7 @@ index 1baea72..dc0e813 100644
  {
      /* PPU_WVAL=<hexvalue>: log every PPU store that WRITES this value, wherever
       * it lands. PPU_WWATCH answers "who writes this address"; when a bad value is
-@@ -1892,6 +2455,12 @@ static inline void barrier_watch_hit(uint32_t a, uint32_t v, int width, void* ra
+@@ -1892,6 +2475,12 @@ static inline void barrier_watch_hit(uint32_t a, uint32_t v, int width, void* ra
      }
  }
  
@@ -10149,7 +10173,7 @@ index 1baea72..dc0e813 100644
  /* See the note on the forward declaration above ppu_stwcx32. */
  extern "C" void ppu_ww_note_atomic(uint32_t ea, uint32_t val, int width, void* ra)
  {
-@@ -3035,7 +3604,62 @@ extern "C" void ppu_prof_stamp(void* ctx, unsigned lr);
+@@ -3035,7 +3624,62 @@ extern "C" void ppu_prof_stamp(void* ctx, unsigned lr);
  #define PS3_SC_INFLIGHT_MAX 64
  extern "C" uint32_t g_sc_inflight[PS3_SC_INFLIGHT_MAX] = { 0 };
  
@@ -10212,7 +10236,7 @@ index 1baea72..dc0e813 100644
  {
      /* One-shot: PPU_GUARD_EA=<hex> arms the page guard on that address without
       * waiting for a store watch to fire. Armed here because lv2_syscall runs
-@@ -3093,10 +3717,13 @@ extern "C" void lv2_syscall(ppu_context* ctx)
+@@ -3093,10 +3737,13 @@ extern "C" void lv2_syscall(ppu_context* ctx)
      switch (num) {
      case 352: {   /* sys_memory_get_user_memory_size(sys_memory_info_t* info)
                     * info = { u32 total_user_memory; u32 available_user_memory } */
@@ -10230,7 +10254,7 @@ index 1baea72..dc0e813 100644
          return;
      }
      case 330: {   /* sys_mmapper_allocate_address(u64 size, u64 flags,
-@@ -3646,6 +4273,17 @@ extern "C" void ppu_register_opd_fixup(uint32_t opd, uint32_t code, uint32_t toc
+@@ -3646,6 +4293,17 @@ extern "C" void ppu_register_opd_fixup(uint32_t opd, uint32_t code, uint32_t toc
          s_opd_fixups[s_opd_fixup_n].code = code; s_opd_fixups[s_opd_fixup_n].toc = toc; s_opd_fixup_n++; }
  }
  
@@ -10248,7 +10272,7 @@ index 1baea72..dc0e813 100644
  extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
                                     uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                                     uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7)
-@@ -3673,7 +4311,7 @@ extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
+@@ -3673,7 +4331,7 @@ extern "C" uint64_t ppu_guest_call(uint32_t opd_addr,
      /* Private scratch stack high in the guest stack region, distinct from the
       * main + ppu_thread stacks. One callback at a time per caller thread. */
      static PPU_THREAD_LOCAL uint32_t s_cb_sp = 0;
@@ -10257,7 +10281,7 @@ index 1baea72..dc0e813 100644
  
      ppu_context ctx;
      memset(&ctx, 0, sizeof(ctx));
-@@ -3718,7 +4356,7 @@ extern "C" uint64_t ppu_guest_call_ct(uint32_t code, uint32_t toc,
+@@ -3718,7 +4376,7 @@ extern "C" uint64_t ppu_guest_call_ct(uint32_t code, uint32_t toc,
      if (!fn) { fprintf(stderr, "[ppu] guest_call_ct: code 0x%08X not registered\n", code); return 0; }
  
      static PPU_THREAD_LOCAL uint32_t s_cb_sp = 0;

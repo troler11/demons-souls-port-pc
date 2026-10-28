@@ -56,9 +56,26 @@ palavra exata, e o CAS só compara essa palavra, que não tinha mudado.
 | Antes da correção | 4 | 4 (entre 1 e 2 min) |
 | Com a correção | 6 | 0 (~60 fps até o fim) |
 
-Boletaria, trecho pesado, sem frame generation, com a correção: 53,5 e
-53,7 fps. As rodadas anteriores do mesmo modo variaram entre 51 e 57 fps;
-um A/B lado a lado ainda não foi feito, então um custo de 2–3 fps não está
-descartado nem confirmado.
+## Custo e filtro
 
-Evidências: `work/diagnostics/nxq_*`, `nxr_*` (antes) e `nxfix_*` (depois).
+A primeira versão percorria os contextos de todas as threads PPU a cada
+escrita confirmada de SPU. O kernel SPURS faz milhões de atômicos por segundo,
+e isso custou ~5 fps em Boletaria (trecho pesado, sem frame generation: 53,5
+com a correção contra 58,4 sem, média de 2 rodadas cada). Agora um bitmap marca
+as linhas em que a PPU já fez `stwcx`/`stdcx` (fixo depois de marcado, como o de
+coerência dos SPUs), e o cancelamento só percorre as threads nessas linhas.
+
+| Boletaria, trecho pesado (A/B no mesmo exe, `PPU_RESV_LINE=0` desliga) | fps médio | mínimo |
+|---|---:|---:|
+| Correção ligada, rodada 1 | 57,0 | 54,4 |
+| Correção desligada, rodada 1 | 57,1 | 54,6 |
+| Correção ligada, rodada 2 | 56,9 | 53,8 |
+| Correção desligada, rodada 2 | 57,5 | 55,0 |
+
+A diferença fica dentro do ruído. Com o filtro, a rota do Nexus foi 3 de 3
+rodadas sem congelar.
+
+Limite do filtro: o primeiro `lwarx`/`stwcx` de uma linha, antes de o bit ser
+marcado, ainda não é protegido.
+
+Evidências: `work/diagnostics/nxq_*`, `nxr_*` (antes), `nxfix_*` e `nxfilt_*` (depois); `work/logs/resv1_*` (sem filtro) e `resv_*` (com filtro).
