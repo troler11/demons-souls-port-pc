@@ -41,6 +41,19 @@ O último é o que decide: nem com o custo dos draws zerado o jogo fica mais
 rápido. O limite do trecho pesado está na cadeia do jogo (HighGraphics ↔ job
 SPURS em `spu1000_0`, a ~99% em todas as rodadas), não no renderizador.
 
+## Qual thread limita: teste causal (29/10)
+
+Sem como acelerar uma thread de graça, o teste faz o inverso: `DES_SLOW_THREAD` tira 20% do tempo de uma thread (suspensa 0,4 ms a cada 2 ms) e mede o fps. Controle com o mesmo auxiliar a 0%.
+
+| Braço | Trecho pesado (fps) | Andando |
+|---|---:|---:|
+| Controle | 55,8 / 53,4 | 58,6 / 57,9 |
+| `spu1000_0` −20% | 49,5 / 52,5 | 53,0 / 57,3 |
+| `HighGraphics` −20% | 53,7 / 55,4 | 58,3 / 57,2 |
+
+- `HighGraphics` (PPU do jogo) não limita: otimizar o código PPU não renderia fps.
+- `spu1000_0` (kernel SPURS + job que monta os comandos do quadro) limita em parte: −3,6 fps em média (−6,6%) para −20% de tempo, com variação grande entre rodadas. Parte do tempo dela é o kernel ocioso procurando trabalho. Acelerá-la ~20% renderia, por simetria, algo como +2 a +4 fps no trecho pesado (estimativa).
+
 ## Opções que ficaram (desligadas por padrão)
 
 - `DES_FPS_DT_MAX_MS=<ms>`: limite menor para o passo de um quadro (ex.: 33).
