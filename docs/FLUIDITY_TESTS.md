@@ -54,6 +54,12 @@ Sem como acelerar uma thread de graça, o teste faz o inverso: `DES_SLOW_THREAD`
 - `HighGraphics` (PPU do jogo) não limita: otimizar o código PPU não renderia fps.
 - `spu1000_0` (kernel SPURS + job que monta os comandos do quadro) limita em parte: −3,6 fps em média (−6,6%) para −20% de tempo, com variação grande entre rodadas. Parte do tempo dela é o kernel ocioso procurando trabalho. Acelerá-la ~20% renderia, por simetria, algo como +2 a +4 fps no trecho pesado (estimativa).
 
+## Runtime SPU: primeira etapa (29/10)
+
+- `MFC_Cmd` do código SPU direto para o motor de atômicos/DMA (`spu_mfc_cmd`, `SPU_MFC_FAST=0` volta ao caminho antigo); checagens de diagnóstico do caminho quente (`hang_watch_line`, `ps3_progress_bump`) trocadas por leitura de variável.
+- A/B, 3 rodadas por braço: 57,8 contra 57,3 fps no trecho pesado (+0,5, dentro do ruído); quadros longos sem melhora. Rota do Nexus 2/2 sem congelar. Mantido por ser equivalente em lógica.
+- Coerente com o teste causal: cada 5% de tempo cortado na `spu1000_0` vale ~1,5% de fps, abaixo do ruído das rodadas. Ganho visível exigiria cortar uma fatia grande do runtime SPU de uma vez.
+
 ## Opções que ficaram (desligadas por padrão)
 
 - `DES_FPS_DT_MAX_MS=<ms>`: limite menor para o passo de um quadro (ex.: 33).
