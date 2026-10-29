@@ -137,7 +137,7 @@ typedef struct {
     const wchar_t* values[6];
 } setting;
 
-enum { S_MODE, S_RES, S_SCALE, S_VSYNC, S_FSR, S_FXAA, S_SHARPEN, S_FPS, S_FRAMEGEN,
+enum { S_MODE, S_RES, S_SCALE, S_VSYNC, S_FSR, S_FXAA, S_SHARPEN, S_FPS, S_FRAMEGEN, S_SMOOTH, S_DTMAX,
        S_MOVIES, S_SKIPINTRO, S_CONTINUE, S_AUTOBACKUP, S_KEYBOARD, S_LOGFILTER, S_COUNT };
 static setting s_set[S_COUNT] = {
     {L"Mode", L"Modo de exibição", L"Janela, ou tela cheia sem borda. No jogo, F11 ou Alt+Enter alterna.",
@@ -158,6 +158,10 @@ static setting s_set[S_COUNT] = {
      T_LIST, 3, 1, 1, {L"30 · original", L"60", L"Sem limite"}},
     {L"FrameGen", L"Frame generation", L"Experimental: a GPU cria um quadro entre cada dois estimando o movimento pela imagem (60 → 120 na tela). Pode deixar rastros e acrescenta atraso.",
      T_TOGGLE, 2, 0, 0, {0}},
+    {L"DtSmooth", L"Suavizar movimento", L"O jogo avança pela média dos últimos quadros em vez do último, então a variação de tempo entre quadros deixa de virar tranco no movimento. O tempo total não muda. Vale no modo 60.",
+     T_LIST, 4, 0, 0, {L"Desligado", L"Leve (2)", L"Médio (4)", L"Forte (8)"}},
+    {L"DtMax", L"Limite de salto por quadro", L"Quanto o jogo pode avançar num quadro que demorou. Menor: um inimigo rápido salta menos de lugar quando o jogo engasga, ao custo de uma desaceleração breve. Vale no modo 60.",
+     T_LIST, 3, 0, 0, {L"50 ms · padrão", L"33 ms", L"25 ms"}},
     {L"Movies", L"Cinemáticas em vídeo", L"Toca as cinemáticas pré-renderizadas (precisa do ffmpeg). Desligadas, o jogo as pula.",
      T_TOGGLE, 2, 1, 1, {0}},
     {L"SkipIntro", L"Encurtar logos de abertura", L"Pula a maior parte dos logos antes do menu principal.",
@@ -676,6 +680,10 @@ static int build_env(env_pair* e, int cap)
     ENV(L"LD_FXAA", s_set[S_FXAA].value ? L"1" : L"0");
     ENV(L"LD_FRAMEGEN", s_set[S_FRAMEGEN].value ? L"1" : L"0");
     ENV(L"LD_SHARPEN", sh);
+    { static const wchar_t* const smooth[] = {NULL, L"2", L"4", L"8"};
+      static const wchar_t* const dtmax[] = {NULL, L"33", L"25"};
+      ENV(L"DES_FPS_DT_SMOOTH", smooth[s_set[S_SMOOTH].value]);
+      ENV(L"DES_FPS_DT_MAX_MS", dtmax[s_set[S_DTMAX].value]); }
     ENV(L"DES_VSYNC", s_set[S_VSYNC].value ? L"1" : L"0");
     ENV(L"SAIL_HOST_PLAY", s_set[S_MOVIES].value ? L"1" : L"0");
     ENV(L"DES_SKIP_INTRO", s_set[S_SKIPINTRO].value ? L"1" : NULL);
@@ -1025,6 +1033,9 @@ static REAL page_perf(GpGraphics* gr, REAL y)
     y = section(gr, y, L"RITMO DOS QUADROS");
     y += row_setting(gr, y, S_FPS);
     y += row_setting(gr, y, S_VSYNC);
+    y = section(gr, y + 10, L"MOVIMENTO NO MODO 60");
+    y += row_setting(gr, y, S_SMOOTH);
+    y += row_setting(gr, y, S_DTMAX);
     y = section(gr, y + 10, L"GERAÇÃO DE QUADROS");
     y += row_setting(gr, y, S_FRAMEGEN);
     y += 16;
