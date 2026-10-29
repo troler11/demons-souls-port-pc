@@ -197,6 +197,30 @@ static float max_frame_dt()
     }
     return v;
 }
+/* DES_FPS_DT_SMOOTH=<n> (2-8; off by default): the game step is the average of
+ * the last n frame times instead of the last one alone. Frame times wander
+ * (16-20 ms in a busy scene) while the display shows frames at a steady
+ * cadence; feeding each raw interval turns that wander into uneven motion.
+ * The average keeps the total time (the world does not fall behind) and
+ * spreads one long frame over n steps. */
+struct DtSmooth { float h[8]; int n, i; };
+static float smooth_dt(DtSmooth& s, float dt)
+{
+    static int k = -1;
+    if (k < 0) {
+        const char* e = getenv("DES_FPS_DT_SMOOTH");
+        k = e && *e ? atoi(e) : 0;
+        if (k < 2) k = 0;
+        if (k > 8) k = 8;
+        if (k) fprintf(stderr, "[des] DES_FPS_DT_SMOOTH=%d: frame step averaged over %d frames\n", k, k);
+    }
+    if (!k) return dt;
+    s.h[s.i] = dt; s.i = (s.i + 1) % k;
+    if (s.n < k) s.n++;
+    float sum = 0.0f;
+    for (int j = 0; j < s.n; j++) sum += s.h[j];
+    return sum / (float)s.n;
+}
 constexpr float    kCutsceneDt   = 1.0f / 30.0f;
 constexpr int      kPs3VblankMhz = 59940;
 
@@ -317,6 +341,8 @@ void fps_on_flip_request()
     if (!cut && last != clock::time_point()) {
         dt = std::chrono::duration<float>(now - last).count();
         if (dt > max_frame_dt()) dt = max_frame_dt();
+        static DtSmooth sm;
+        dt = smooth_dt(sm, dt);
     }
     uint32_t bits;
     memcpy(&bits, &dt, 4);
@@ -574,6 +600,8 @@ extern "C" double des_title_frame_dt(double original)
         previous != clock::time_point()) {
         dt = std::chrono::duration<double>(now - previous).count();
         if (dt > max_frame_dt()) dt = max_frame_dt();
+        static DtSmooth sm;
+        dt = smooth_dt(sm, (float)dt);
     }
     previous = now;
     previous_fps = fps;
