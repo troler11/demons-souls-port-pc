@@ -258,6 +258,10 @@ extern "C" void des_fc_split(unsigned long long* fifo, unsigned long long* pres)
     *fifo = s_fc_fifo_tsc; *pres = s_fc_pres_tsc;
 }
 
+#if defined(DES_PGO_GEN)
+extern "C" int __llvm_profile_write_file(void);   /* clang_rt.profile (DES_PGO=gen) */
+#endif
+
 static void present_guest_frame(void)
 {
     rsx_present();
@@ -393,7 +397,11 @@ static DWORD WINAPI frame_clock(LPVOID)
          * ~39 frames a second -- a faster game, not a smoother one. */
         /* And only with 10+ logical processors: on a smaller CPU the spinning
          * core is one the game's own threads need (Boletaria on 6 threads:
-         * 13-25 fps spinning, 45-49 not). */
+         * 13-25 fps spinning, 45-49 not). FC_SPIN_US=0 sleeps there too:
+         * Boletaria on a Ryzen 5 5500 (6c/12t), 3 runs each, 57.8 fps either
+         * way with frame_clock ~10 points of a core lighter -- but kept off by
+         * default after one Nexus freeze in 12 runs sleeping (0 of 3 spinning,
+         * 11 of 11 before), too few runs to clear it (05/11/2026). */
         if (spin_us < 0) {
             const char* e = getenv("FC_SPIN_US");
             DWORD_PTR pm = 0, sm = 0; int cpus = 0;
@@ -433,6 +441,15 @@ static DWORD WINAPI frame_clock(LPVOID)
             }
         }
         const double now_us = (double)ps3_qpc_us();
+#if defined(DES_PGO_GEN)
+        /* DES_PGO=gen: the profile normally lands at a clean exit, and test
+         * runs end in a kill; write the counters so far every 30 s. */
+        { static double next_write;
+          if (now_us >= next_write) {
+              if (next_write) __llvm_profile_write_file();
+              next_write = now_us + 30e6;
+          } }
+#endif
         if (s_rsx_live) rsx_live_draw_framegen_tick();   /* LD_FRAMEGEN: the held real frame */
 
         int fired = 0;

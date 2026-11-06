@@ -60,6 +60,24 @@ Sem como acelerar uma thread de graça, o teste faz o inverso: `DES_SLOW_THREAD`
 - A/B, 3 rodadas por braço: 57,8 contra 57,3 fps no trecho pesado (+0,5, dentro do ruído); quadros longos sem melhora. Rota do Nexus 2/2 sem congelar. Mantido por ser equivalente em lógica.
 - Coerente com o teste causal: cada 5% de tempo cortado na `spu1000_0` vale ~1,5% de fps, abaixo do ruído das rodadas. Ganho visível exigiria cortar uma fatia grande do runtime SPU de uma vez.
 
+## Ideias do port de God of War: Ascension (05–06/11)
+
+Do repositório `arnaldolima1/gow-ascension-pc` (pinagem de threads, PGO, RSX dormindo, blocos SPU fundidos). Boletaria, 3 rodadas por braço, Ryzen 5 5500 (6 núcleos/12 threads, sem AVX-512):
+
+| Teste | Resultado | Decisão |
+|---|---|---|
+| `frame_clock` dormindo em vez de girar (`FC_SPIN_US=0`) | 57,8 fps nos dois; ~10 pontos de CPU a menos no renderizador; quadros longos iguais ou menos | Padrão mantido girando: 1 congelamento do Nexus em 12 rodadas dormindo (0 em 3 girando, 11 em 11 antes) — poucas rodadas para descartar |
+| `spu1000_0` sozinha num núcleo físico (pinagem) | 58,0 contra 58,1 fps | Removido |
+| PGO no runtime + código SPU (`-DDES_PGO=gen|use`) | 58,1 contra 58,8 fps | Opção no CMake, desligada |
+| Blocos SPU fundidos (`-DPS3RECOMP_SPU_MERGE=ON`) | 57,8 contra 57,6 fps | Opção no CMake, desligada |
+| Busca de export do HLE por índice (`prx_resolve_export` fazia busca linear a cada chamada) | sem efeito medível no fps | Mantido (equivalente, mais barato) |
+
+O trecho pesado desta rota já roda a 57–59 fps, perto do limite de 60: sobra pouca margem para medir ganhos nele.
+
+### Aberto: uma task SPURS interpretada
+
+`SPU_INTERP_PROF=1` mostra a task do EBOOT na LS `0xF2FC` (ELF `0x01832680`, imagem `380810790`) passando ~2 s de cada 5 s no interpretador, na `spu1000_3` (não na `spu1000_0`, que limita). A task retoma no meio de uma função; uma vez no interpretador, `spu_lifted_lookup` procura só na imagem base (não na task adotada) e nunca volta ao código gerado. Fazer o `spu_lifted_lookup` consultar a task tirou o tempo do interpretador, mas um salto no boot para LS `0x32890` (retorno `0x05F60`) que encerra um job apareceu em 6 de 6 rodadas assim, contra 2 de ~10 com o executável antigo nesta série e 0 em 38 antes. Como esse job pode ser a própria task, a correção foi revertida até se saber o que é esse salto.
+
 ## Opções que ficaram (desligadas por padrão)
 
 - `DES_FPS_DT_MAX_MS=<ms>`: limite menor para o passo de um quadro (ex.: 33).

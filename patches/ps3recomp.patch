@@ -14,6 +14,31 @@ index cefc2a9..4550cfb 100644
      endif()
  elseif(MSVC)
      # Real cl.exe -- clang-cl reports its id as Clang and is handled above.
+diff --git a/cmake/PS3RecompSPU.cmake b/cmake/PS3RecompSPU.cmake
+index 09509b2..15bed36 100644
+--- a/cmake/PS3RecompSPU.cmake
++++ b/cmake/PS3RecompSPU.cmake
+@@ -10,6 +10,20 @@ function(ps3recomp_generate_spu output_dir)
+         list(APPEND command --input "${input}")
+         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
+     endforeach()
++    # PS3RECOMP_SPU_EXTRA_FUNCS: "<content name>=ADDR[,ADDR...]" entries (a list) for
++    # code the dispatcher must enter mid-function -- a SPURS task's resume pc, which
++    # otherwise has no lifted entry and runs in the interpreter (SPU_INTERP_PROF).
++    foreach(spec IN LISTS PS3RECOMP_SPU_EXTRA_FUNCS)
++        list(APPEND command --extra-funcs "${spec}")
++    endforeach()
++    # PS3RECOMP_SPU_MERGE: contiguous chunks become one C function with gotos
++    # (spu_lifter --merge-chunks), so SPU loops run as host loops instead of
++    # returning to the dispatcher every iteration.
++    if(PS3RECOMP_SPU_MERGE)
++        set(ENV{PS3RECOMP_SPU_MERGE} 1)
++    else()
++        unset(ENV{PS3RECOMP_SPU_MERGE})
++    endif()
+     foreach(tool IN ITEMS build_spu_workloads.py spu_program_pipeline.py spu_elf.py
+                           extract_spu_images.py spu_lifter.py find_spu_functions.py spu_disasm.py)
+         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PS3RECOMP_DIR}/tools/${tool}")
 diff --git a/include/ps3emu/ps3_knob.h b/include/ps3emu/ps3_knob.h
 new file mode 100644
 index 0000000..3b085a3
@@ -10732,6 +10757,60 @@ index 35052c6..9764dd4 100644
  #define VMX_FUN(name, expr, flush_in, nanmode) \
  VMX_INL void name(VMX_D, VMX_B, uint32_t vscr) { const uint8_t* b = (const uint8_t*)b_; uint8_t r[16]; \
      for (int i = 0; i < 4; i++) { uint32_t y = vmx_w(b, i); if (flush_in) y = vmx_flush(y, vscr); \
+diff --git a/runtime/prx/prx_loader.c b/runtime/prx/prx_loader.c
+index 9cc3670..32e3069 100644
+--- a/runtime/prx/prx_loader.c
++++ b/runtime/prx/prx_loader.c
+@@ -16,13 +16,19 @@
+ extern uint8_t* vm_base;
+ 
+ /* ---- export registry ---------------------------------------------------- *
+- * Flat NID -> guest-address table, filled as modules load. A handful of system
+- * PRXs export a few hundred symbols total, so a linear array with linear lookup
+- * is plenty (lookups happen once per import resolution, not per call). */
++ * Flat NID -> guest-address table, filled as modules load. The HLE dispatcher
++ * (ppu_hle.cpp ps3_hle_call) looks a NID up on every import CALL, not once
++ * per resolution, and the linear scan over a few hundred exports was a hot
++ * loop on the PPU threads (PGO profile: ~1e8 iterations a second in
++ * Boletaria). An open-addressed index beside the array makes it one probe.
++ * Filled while modules load, read-only afterwards. */
+ typedef struct { uint32_t nid; uint32_t guest_addr; } prx_export_reg_entry;
+ #define PRX_EXPORT_REG_CAP 2048
++#define PRX_EXPORT_IDX_SIZE 8192u          /* power of two, > 2 x the cap */
+ static prx_export_reg_entry s_export_reg[PRX_EXPORT_REG_CAP];
+ static uint32_t             s_export_reg_n = 0;
++static uint16_t             s_export_idx[PRX_EXPORT_IDX_SIZE];   /* entry index + 1, 0 = empty */
++static inline uint32_t prx_export_slot(uint32_t nid) { return (nid * 2654435761u) >> 19; }   /* 13 bits */
+ 
+ static void prx_export_register(uint32_t nid, uint32_t guest_addr)
+ {
+@@ -34,17 +40,21 @@ static void prx_export_register(uint32_t nid, uint32_t guest_addr)
+             return;
+         }
+     }
+-    if (s_export_reg_n < PRX_EXPORT_REG_CAP)
++    if (s_export_reg_n < PRX_EXPORT_REG_CAP) {
++        uint32_t h = prx_export_slot(nid);
++        while (s_export_idx[h]) h = (h + 1u) & (PRX_EXPORT_IDX_SIZE - 1u);
+         s_export_reg[s_export_reg_n++] = (prx_export_reg_entry){ nid, guest_addr };
+-    else
++        s_export_idx[h] = (uint16_t)s_export_reg_n;
++    } else
+         fprintf(stderr, "[prx] export registry full, dropping NID 0x%08X\n", nid);
+ }
+ 
+ uint32_t prx_resolve_export(uint32_t nid)
+ {
+-    for (uint32_t i = 0; i < s_export_reg_n; i++)
+-        if (s_export_reg[i].nid == nid)
+-            return s_export_reg[i].guest_addr;
++    for (uint32_t h = prx_export_slot(nid); s_export_idx[h]; h = (h + 1u) & (PRX_EXPORT_IDX_SIZE - 1u)) {
++        const prx_export_reg_entry* e = &s_export_reg[s_export_idx[h] - 1u];
++        if (e->nid == nid) return e->guest_addr;
++    }
+     return 0;
+ }
+ 
 diff --git a/runtime/spu/spu_channels.c b/runtime/spu/spu_channels.c
 index 506da3f..8cecbfd 100644
 --- a/runtime/spu/spu_channels.c

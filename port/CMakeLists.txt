@@ -285,6 +285,33 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
 )
 
+# DES_PGO: profile-guided optimization of the runtime and the lifted SPU code,
+# where the SPURS kernel SPU (spu1000_0, on the frame's critical path) spends
+# half its time. The lifted PPU code is left out: it does not limit the frame
+# (DES_SLOW_THREAD) and its units take tens of minutes to build.
+#   gen  instrumented build; each run writes LLVM_PROFILE_FILE (*.profraw)
+#   use  build with DES_PGO_PROFILE (llvm-profdata merge of those runs)
+set(DES_PGO "" CACHE STRING "Profile-guided optimization stage: empty, gen or use")
+set(DES_PGO_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/../work/pgo/des.profdata" CACHE FILEPATH "Merged PGO profile")
+if(DES_PGO STREQUAL "gen" OR DES_PGO STREQUAL "use")
+    if(DES_PGO STREQUAL "gen")
+        set(DES_PGO_FLAGS "/clang:-fprofile-instr-generate")
+        get_filename_component(DES_CLANG_BIN "${CMAKE_C_COMPILER}" DIRECTORY)
+        file(GLOB DES_CLANG_PROFILE_LIB "${DES_CLANG_BIN}/../lib/clang/*/lib/windows/clang_rt.profile-x86_64.lib")
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${DES_CLANG_PROFILE_LIB})
+        # frame_clock writes the profile every 30 s: test runs end in a kill.
+        # (main.cpp only: a target-wide define rebuilds every lifted PPU unit)
+        set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS DES_PGO_GEN=1)
+    else()
+        set(DES_PGO_FLAGS "/clang:-fprofile-instr-use=${DES_PGO_PROFILE};/clang:-Wno-profile-instr-unprofiled;/clang:-Wno-profile-instr-out-of-date")
+    endif()
+    target_compile_options(ps3recomp_runtime PRIVATE ${DES_PGO_FLAGS})
+    if(SPU_SOURCES)
+        set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_OPTIONS ${DES_PGO_FLAGS})
+    endif()
+    message(STATUS "PGO:             ${DES_PGO} (runtime + lifted SPU)")
+endif()
+
 # The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
 # link language from the generated C would leave the C++ standard library out.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
